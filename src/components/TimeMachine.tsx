@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
+import { BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, Cell } from 'recharts'
 import {
   CurrentSignals,
+  ContextEvent,
   DEFAULT_SIGNALS,
   generatePrediction,
   TimeMachinePrediction
 } from '../predictor/timeMachine'
 import { fetchLiveSignals, generateNarrative } from '../predictor/liveSignals'
+import { fetchWikidataEvents } from '../worlds/wikidataAnchors'
+import { runSensitivityAnalysis, SensitivityResult } from '../predictor/sensitivity'
 
 const inputFields: Array<{ key: keyof CurrentSignals; label: string; suffix?: string; source?: string }> = [
   { key: 'oilPrice', label: 'Oil Price', suffix: '$/barrel', source: 'Yahoo Finance' },
@@ -72,13 +76,21 @@ const STALE_THRESHOLD_MS = 60 * 60 * 1000
 
 export default function TimeMachine() {
   const [signals, setSignals] = useState<CurrentSignals>(DEFAULT_SIGNALS)
-  const [prediction, setPrediction] = useState<TimeMachinePrediction>(() => generatePrediction(DEFAULT_SIGNALS))
+  const [prediction, setPrediction] = useState<TimeMachinePrediction>(() =>
+    generatePrediction(DEFAULT_SIGNALS)
+  )
   const [runToken, setRunToken] = useState<number>(Date.now())
   const [loading, setLoading] = useState(false)
   const [dataStatus, setDataStatus] = useState<StatusMap>(() => buildDefaultStatus())
   const [dataTimestamps, setDataTimestamps] = useState<TimestampMap>({})
   const [narrative, setNarrative] = useState<string>('')
   const [narrativeError, setNarrativeError] = useState<string>('')
+  const [contextEvents, setContextEvents] = useState<ContextEvent[]>([])
+  const [contextLoading, setContextLoading] = useState(false)
+  const [contextError, setContextError] = useState('')
+  const [sensitivity, setSensitivity] = useState<SensitivityResult[]>([])
+  const [signalsFromUrl, setSignalsFromUrl] = useState(false)
+  const [shareStatus, setShareStatus] = useState<'idle' | 'copied'>('idle')
 
   const confidenceStyle = useMemo(
     () => ({ width: `${prediction.confidenceScore}%` }),
@@ -86,15 +98,35 @@ export default function TimeMachine() {
   )
 
   const onRun = () => {
-    const result = generatePrediction(signals)
+    const result = generatePrediction(signals, contextEvents)
     setPrediction(result)
     setRunToken(Date.now())
     setNarrativeError('')
     try {
       const text = generateNarrative(signals, result)
       setNarrative(text)
+      setSensitivity(runSensitivityAnalysis(signals))
     } catch (error) {
       setNarrativeError((error as Error).message || 'Failed to generate briefing')
+    }
+  }
+
+  const encodeSignalsToUrl = (payload: CurrentSignals) => {
+    const json = JSON.stringify(payload)
+    const encoded = btoa(json)
+    const url = new URL(window.location.href)
+    url.searchParams.set('signals', encoded)
+    return url.toString()
+  }
+
+  const decodeSignalsFromUrl = () => {
+    const params = new URLSearchParams(window.location.search)
+    const encoded = params.get('signals')
+    if (!encoded) return null
+    try {
+      return JSON.parse(atob(encoded)) as CurrentSignals
+    } catch {
+      return null
     }
   }
 
@@ -146,7 +178,40 @@ export default function TimeMachine() {
   }
 
   useEffect(() => {
+    const fromUrl = decodeSignalsFromUrl()
+    if (fromUrl) {
+      setSignals(fromUrl)
+      setSignalsFromUrl(true)
+      const result = generatePrediction(fromUrl, contextEvents)
+      setPrediction(result)
+      setNarrative(generateNarrative(fromUrl, result))
+      setSensitivity(runSensitivityAnalysis(fromUrl))
+    }
     fetchSignals()
+  }, [])
+
+  useEffect(() => {
+    const loadContext = async () => {
+      setContextLoading(true)
+      setContextError('')
+      try {
+        const endYear = new Date().getFullYear()
+        const startYear = endYear - 10
+        const events = await fetchWikidataEvents(startYear, endYear, 80)
+        const mapped = events.map((event) => ({
+          label: event.label,
+          description: event.description,
+          date: event.date
+        }))
+        setContextEvents(mapped)
+        setPrediction(generatePrediction(signals, mapped))
+      } catch (error) {
+        setContextError((error as Error).message || 'Failed to load Wikidata context')
+      } finally {
+        setContextLoading(false)
+      }
+    }
+    loadContext()
   }, [])
 
   return (
@@ -161,6 +226,11 @@ export default function TimeMachine() {
           >
             {loading ? 'Refreshing...' : 'Refresh live data'}
           </button>
+        </div>
+        <div className="mt-2 text-xs text-slate-400">
+          {contextLoading && 'Loading Wikidata context...'}
+          {!contextLoading && contextError && `Wikidata context unavailable: ${contextError}`}
+          {!contextLoading && !contextError && contextEvents.length > 0 && 'Wikidata context loaded.'}
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           {inputFields.map((field) => {
@@ -225,6 +295,110 @@ export default function TimeMachine() {
               <div className="mt-3 text-xs text-slate-400">{pattern.keyLesson}</div>
             </div>
           ))}
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-3">
+          {(() => {
+            const models = prediction.modelOutputs
+            const rrRisk = Math.round(models.reinhartRogoff.riskScore * 100)
+            const rrPenalty = Number(models.reinhartRogoff.gdpPenalty.toFixed(2))
+            const rrStatus = rrRisk > 60 ? 'red' : rrRisk > 35 ? 'amber' : 'green'
+
+            const acemogluRisk = Math.round(models.acemoglu.displacementRisk * 100)
+            const laborShareDelta = Number(models.acemoglu.laborShareDelta.toFixed(2))
+            const acemogluStatus = acemogluRisk > 60 ? 'red' : acemogluRisk > 35 ? 'amber' : 'green'
+
+            const nordhausDrag = Number(models.nordhaus.toFixed(2))
+            const nordhausStatus = nordhausDrag > 2.0 ? 'red' : nordhausDrag > 1.0 ? 'amber' : 'green'
+
+            const warProb = Math.round(models.richardson.warProbability12mo * 100)
+            const armsStatus = warProb > 40 ? 'red' : warProb > 20 ? 'amber' : 'green'
+
+            const jPhase = models.brynjolfsson.currentPhase
+            const lagYears = Math.round(models.brynjolfsson.lagYearsRemaining)
+            const jStatus = jPhase === 'investment' ? 'red' : jPhase === 'reorganisation' ? 'amber' : 'green'
+
+            const dalioPhase = models.dalio.cyclePhase
+            const yearsToCrisis = Math.round(models.dalio.yearsToNextCrisis)
+            const dalioStatus = ['crisis', 'deleveraging'].includes(dalioPhase) ? 'red' : dalioPhase === 'peak' ? 'amber' : 'green'
+
+            const statusStyles = {
+              red: 'border-red-400/40 bg-red-500/10 text-red-200',
+              amber: 'border-amber-400/40 bg-amber-500/10 text-amber-200',
+              green: 'border-emerald-400/40 bg-emerald-500/10 text-emerald-200'
+            } as const
+
+            const cards = [
+              {
+                title: 'Reinhart–Rogoff',
+                status: rrStatus,
+                lines: [
+                  `Debt crisis risk: ${rrRisk}%`,
+                  `GDP penalty: ${rrPenalty}%`,
+                  rrRisk > 60 ? 'Debt thresholds breached; crisis odds elevated.' : 'Debt drag present but not extreme.'
+                ]
+              },
+              {
+                title: 'Acemoglu–Restrepo',
+                status: acemogluStatus,
+                lines: [
+                  `Labor share Δ: ${laborShareDelta}%`,
+                  `Displacement risk: ${acemogluRisk}%`,
+                  acemogluRisk > 60 ? 'Automation shock likely; wage pressure rising.' : 'Displacement manageable if productivity follows.'
+                ]
+              },
+              {
+                title: 'Nordhaus DICE',
+                status: nordhausStatus,
+                lines: [
+                  `Climate drag: −${nordhausDrag}%/yr`,
+                  `Temp anomaly: ${signals.tempAnomalyC}°C`,
+                  nordhausDrag > 2 ? 'Climate damages now a macro headwind.' : 'Climate drag rising but still contained.'
+                ]
+              },
+              {
+                title: 'Richardson Arms',
+                status: armsStatus,
+                lines: [
+                  `War prob (12mo): ${warProb}%`,
+                  `Conflict accel: ${Number(models.richardson.conflictAcceleration.toFixed(2))}`,
+                  warProb > 40 ? 'Arms spiral risk rising; escalation plausible.' : 'Arms dynamics elevated but not runaway.'
+                ]
+              },
+              {
+                title: 'Brynjolfsson J-Curve',
+                status: jStatus,
+                lines: [
+                  `Phase: ${jPhase}`,
+                  `Years to harvest: ${lagYears}`,
+                  jPhase === 'harvest' ? 'Productivity upside now compounding.' : 'Reorg phase still suppressing measured gains.'
+                ]
+              },
+              {
+                title: 'Dalio Debt Cycle',
+                status: dalioStatus,
+                lines: [
+                  `Phase: ${dalioPhase}`,
+                  `Years to crisis: ${yearsToCrisis}`,
+                  dalioPhase === 'crisis' ? 'Late-cycle stress likely to intensify.' : 'Cycle pressure building but not decisive.'
+                ]
+              }
+            ]
+
+            return cards.map((card) => (
+              <div
+                key={card.title}
+                className={`rounded-2xl border p-4 shadow-glow ${statusStyles[card.status]}`}
+              >
+                <div className="text-sm font-semibold">{card.title}</div>
+                <div className="mt-3 space-y-1 text-xs">
+                  {card.lines.map((line, index) => (
+                    <div key={`${card.title}-${index}`}>{line}</div>
+                  ))}
+                </div>
+              </div>
+            ))
+          })()}
         </section>
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-glow">
@@ -342,6 +516,84 @@ export default function TimeMachine() {
               <p className="text-xs text-slate-500">Run prediction to generate briefing.</p>
             )
           )}
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-glow">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-white">Sensitivity Analysis</div>
+              <div className="mt-1 text-xs text-slate-400">Top 10 signals ranked by impact.</div>
+            </div>
+            <button
+              className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200"
+              onClick={() => setSensitivity(runSensitivityAnalysis(signals))}
+            >
+              Recompute
+            </button>
+          </div>
+          <div className="mt-4 h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={sensitivity.slice(0, 10)} layout="vertical" margin={{ left: 20 }}>
+                <XAxis type="number" domain={[0, 100]} stroke="rgba(255,255,255,0.6)" />
+                <YAxis dataKey="signalLabel" type="category" width={140} stroke="rgba(255,255,255,0.6)" />
+                <Tooltip
+                  contentStyle={{
+                    background: 'rgba(10, 15, 20, 0.95)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '12px',
+                    color: '#f1f5f9'
+                  }}
+                />
+                <Bar dataKey="overallSensitivity" radius={[6, 6, 6, 6]}>
+                  {sensitivity.slice(0, 10).map((entry, index) => (
+                    <Cell
+                      key={`cell-${entry.signalKey}`}
+                      fill={index < 3 ? '#E24B4A' : index < 6 ? '#BA7517' : '#94A3B8'}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {sensitivity.length > 0 && (
+              <>
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-slate-300">
+                  Most important signal: {sensitivity[0].signalLabel} — moving it ±20% changes GDP forecast by ±
+                  {Math.abs(sensitivity[0].gdpSensitivity).toFixed(2)}%
+                </div>
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-slate-300">
+                  Least important: {sensitivity[Math.min(9, sensitivity.length - 1)].signalLabel} — minimal prediction
+                  impact
+                </div>
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-slate-300">
+                  Watch list: {sensitivity.slice(0, 3).map((item) => item.signalLabel).join(', ')}
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-glow">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm font-semibold text-white">Share this prediction</div>
+            {signalsFromUrl && (
+              <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-xs text-emerald-200">
+                Loaded from shared link
+              </span>
+            )}
+          </div>
+          <button
+            className="mt-4 rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200"
+            onClick={async () => {
+              const url = encodeSignalsToUrl(signals)
+              await navigator.clipboard.writeText(url)
+              setShareStatus('copied')
+              setTimeout(() => setShareStatus('idle'), 2000)
+            }}
+          >
+            {shareStatus === 'copied' ? 'Copied!' : 'Copy shareable link'}
+          </button>
         </section>
       </div>
     </div>

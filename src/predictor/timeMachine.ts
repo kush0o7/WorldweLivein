@@ -13,6 +13,17 @@ export interface CurrentSignals {
   tradeOpenness: number
   geopoliticalTension: number
   tempAnomalyC: number
+  publicDebtGdpRatio: number
+  creditGrowthRate: number
+  externalDebtGdpRatio: number
+  robotsPer1000Workers: number
+  laborShareOfIncome: number
+  militarySpendingGrowth: number
+  alliancePolarisation: number
+  globalDebtToGdp: number
+  reserveCurrencyTrend: number
+  giniCoefficient: number
+  aiAdoptionRate?: number
 }
 
 export interface HistoricalPattern {
@@ -60,6 +71,21 @@ export interface ScenarioOutcome {
   historicalPrecedent: string
 }
 
+export interface ContextEvent {
+  label: string
+  description?: string
+  date?: string
+}
+
+export interface ModelOutputs {
+  reinhartRogoff: ReturnType<typeof reinhartRogoffScore>
+  acemoglu: ReturnType<typeof acemogluDisplacementScore>
+  nordhaus: number
+  richardson: ReturnType<typeof richardsonArmsDynamics>
+  brynjolfsson: ReturnType<typeof brynjolfssonJCurve>
+  dalio: ReturnType<typeof dalioCyclePosition>
+}
+
 export interface TimeMachinePrediction {
   topAnalogies: MatchedPattern[]
   scenarios: {
@@ -70,6 +96,7 @@ export interface TimeMachinePrediction {
   keyRisks: Risk[]
   keyOpportunities: Opportunity[]
   confidenceScore: number
+  modelOutputs: ModelOutputs
 }
 
 const NORMALIZATION_RANGES: Record<keyof CurrentSignals, [number, number]> = {
@@ -86,7 +113,18 @@ const NORMALIZATION_RANGES: Record<keyof CurrentSignals, [number, number]> = {
   populismIndex: [0, 10],
   tradeOpenness: [0, 100],
   geopoliticalTension: [0, 10],
-  tempAnomalyC: [0, 4]
+  tempAnomalyC: [0, 4],
+  publicDebtGdpRatio: [0, 200],
+  creditGrowthRate: [0, 20],
+  externalDebtGdpRatio: [0, 150],
+  robotsPer1000Workers: [0, 10],
+  laborShareOfIncome: [40, 70],
+  militarySpendingGrowth: [0, 15],
+  alliancePolarisation: [0, 10],
+  globalDebtToGdp: [100, 350],
+  reserveCurrencyTrend: [-10, 10],
+  giniCoefficient: [20, 100],
+  aiAdoptionRate: [0, 100]
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
@@ -354,7 +392,18 @@ export const DEFAULT_SIGNALS: CurrentSignals = {
   populismIndex: 7,
   tradeOpenness: 52,
   geopoliticalTension: 9,
-  tempAnomalyC: 1.2
+  tempAnomalyC: 1.2,
+  publicDebtGdpRatio: 122,
+  creditGrowthRate: 4.2,
+  externalDebtGdpRatio: 65,
+  robotsPer1000Workers: 2.1,
+  laborShareOfIncome: 57,
+  militarySpendingGrowth: 6.8,
+  alliancePolarisation: 7.5,
+  globalDebtToGdp: 280,
+  reserveCurrencyTrend: -2.5,
+  giniCoefficient: 66,
+  aiAdoptionRate: 65
 }
 
 const conflictTrendFromChange = (value: number): ScenarioOutcome['conflictTrend'] => {
@@ -369,23 +418,232 @@ const weightedAverage = (items: MatchedPattern[], accessor: (item: MatchedPatter
   return items.reduce((sum, item) => sum + accessor(item) * item.analogyScore, 0) / totalWeight
 }
 
-export const findAnalogies = (current: CurrentSignals, topN = 3): MatchedPattern[] => {
+const inferPatternCategory = (pattern: HistoricalPattern) => {
+  const text = `${pattern.name} ${pattern.keyLesson} ${pattern.outcomes.at1year}`.toLowerCase()
+  if (/(war|conflict|invasion|battle|armistice|nuclear)/.test(text)) return 'war'
+  if (/(inflation|recession|depression|crisis|bust|shock|default)/.test(text)) return 'economic'
+  if (/(ai|tech|internet|electric|industrial|automation)/.test(text)) return 'tech'
+  if (/(pandemic|health|virus|covid|flu)/.test(text)) return 'society'
+  if (/(climate|warming|energy|oil|carbon)/.test(text)) return 'climate'
+  if (/(election|populism|authoritarian|political|coup|reform)/.test(text)) return 'political'
+  return 'general'
+}
+
+const scoreContextBoost = (pattern: HistoricalPattern, contextEvents?: ContextEvent[]) => {
+  if (!contextEvents || contextEvents.length === 0) return 0
+  const category = inferPatternCategory(pattern)
+  const text = contextEvents
+    .map((event) => `${event.label} ${event.description ?? ''}`.toLowerCase())
+    .join(' ')
+
+  const categoryHits: Record<string, RegExp> = {
+    war: /(war|conflict|battle|attack|missile|drone|invasion|ceasefire)/g,
+    economic: /(recession|crisis|inflation|debt|bank|default|collapse|shock)/g,
+    tech: /(ai|chip|semiconductor|automation|technology|internet|cyber)/g,
+    society: /(pandemic|health|protest|strike|unrest|migration)/g,
+    climate: /(climate|warming|flood|drought|hurricane|wildfire|energy)/g,
+    political: /(election|coup|sanction|treaty|parliament|government)/g,
+    general: /(crisis|conflict|shock|war)/g
+  }
+
+  const regex = categoryHits[category] ?? categoryHits.general
+  const hits = (text.match(regex) ?? []).length
+  return Math.min(0.12, hits * 0.01)
+}
+
+const computeMSEScore = (pattern: HistoricalPattern, signals: CurrentSignals) => {
+  const keys = Object.keys(pattern.signals) as Array<keyof CurrentSignals>
+  const diffs: number[] = []
+
+  keys.forEach((key) => {
+    const patternValue = pattern.signals[key]
+    const currentValue = signals[key]
+    if (patternValue === undefined || currentValue === undefined) return
+    const normalizedCurrent = normalize(key, currentValue)
+    const normalizedPattern = normalize(key, patternValue)
+    diffs.push(Math.pow(normalizedCurrent - normalizedPattern, 2))
+  })
+
+  const meanSquaredDifference = diffs.length ? diffs.reduce((sum, diff) => sum + diff, 0) / diffs.length : 1
+  return 1 / (1 + meanSquaredDifference)
+}
+
+export const reinhartRogoffScore = (signals: CurrentSignals) => {
+  let riskScore = 0
+  if (signals.publicDebtGdpRatio > 90) {
+    riskScore += 0.3 * ((signals.publicDebtGdpRatio - 90) / 100)
+  }
+  if (signals.creditGrowthRate > 10) {
+    riskScore += 0.25
+  }
+  if (signals.externalDebtGdpRatio > 60) {
+    riskScore += 0.2
+  }
+  const gdpPenalty = signals.publicDebtGdpRatio > 90 ? -1.0 * ((signals.publicDebtGdpRatio - 90) / 90) : 0
+  return { riskScore: Math.min(riskScore, 1), gdpPenalty }
+}
+
+export const acemogluDisplacementScore = (signals: CurrentSignals) => {
+  const robotWageEffect = signals.robotsPer1000Workers * -0.42
+  const automationRate = (signals.techLayoffs12mo / 500000) * (signals.aiInvestmentBillions / 600)
+  const laborShareDelta = -automationRate * 0.34
+  const sosoRisk = signals.aiInvestmentBillions > 300 && signals.globalGDPGrowth < 2.5 ? 0.4 : 0.1
+
+  return {
+    wageEffect: robotWageEffect,
+    laborShareDelta,
+    displacementRisk: Math.min(sosoRisk + automationRate * 0.3, 1)
+  }
+}
+
+export const nordhausDamageFunction = (tempAnomaly: number) => {
+  const alpha = 0.00236
+  const damage = 1 - 1 / (1 + alpha * Math.pow(tempAnomaly, 2))
+  return damage * 100
+}
+
+export const richardsonArmsDynamics = (signals: CurrentSignals) => {
+  const reactionRate = signals.geopoliticalTension / 10
+  const fatigueRate = 0.3
+  const grievance = signals.activeWarCount / 15
+
+  const conflictAcceleration =
+    reactionRate * (signals.militarySpendingGrowth / 100) - fatigueRate * 0.5 + grievance
+
+  const z =
+    -4.5 +
+    signals.geopoliticalTension * 0.4 +
+    signals.nuclearThreatLevel * -0.3 +
+    signals.alliancePolarisation * 0.25 +
+    signals.activeWarCount * 0.15
+  const warProbability12mo = 1 / (1 + Math.exp(-z))
+
+  return { conflictAcceleration, warProbability12mo }
+}
+
+export const brynjolfssonJCurve = (signals: CurrentSignals, yearsIntoAIEra: number) => {
+  const baseLag = 11
+  const diffusionAdjustment = (signals.aiInvestmentBillions / 600) * 3
+  const adjustedLag = baseLag - diffusionAdjustment
+
+  const phase =
+    yearsIntoAIEra < adjustedLag * 0.4
+      ? 'investment'
+      : yearsIntoAIEra < adjustedLag
+        ? 'reorganisation'
+        : 'harvest'
+
+  const adoptionRate = signals.aiAdoptionRate ?? 65
+  const productivityEffect =
+    phase === 'investment'
+      ? -0.1 * (signals.aiInvestmentBillions / 600)
+      : phase === 'reorganisation'
+        ? 0.05
+        : Math.min(3.5, (yearsIntoAIEra - adjustedLag) * 0.4 * (adoptionRate / 100))
+
+  return {
+    currentPhase: phase as 'investment' | 'reorganisation' | 'harvest',
+    productivityEffect,
+    lagYearsRemaining: Math.max(0, adjustedLag - yearsIntoAIEra)
+  }
+}
+
+export const dalioCyclePosition = (signals: CurrentSignals) => {
+  let cycleScore = 0
+
+  if (signals.globalDebtToGdp > 250) cycleScore += 30
+  if (signals.globalDebtToGdp > 300) cycleScore += 20
+  if (signals.publicDebtGdpRatio > 100) cycleScore += 15
+  if (signals.giniCoefficient > 70) cycleScore += 10
+  if (signals.reserveCurrencyTrend < -3) cycleScore += 15
+  if (signals.inflationRate > 4) cycleScore += 10
+
+  const phase =
+    cycleScore < 30
+      ? 'expansion'
+      : cycleScore < 50
+        ? 'peak'
+        : cycleScore < 70
+          ? 'deleveraging'
+          : cycleScore < 85
+            ? 'crisis'
+            : 'recovery'
+
+  const yearsToNextCrisis = Math.max(1, 10 - (cycleScore - 40) / 10)
+
+  return {
+    cyclePhase: phase as 'expansion' | 'peak' | 'deleveraging' | 'crisis' | 'recovery',
+    cycleRisk: cycleScore / 100,
+    yearsToNextCrisis
+  }
+}
+
+const computeAllModels = (signals: CurrentSignals): ModelOutputs => {
+  const aiEraYear = new Date().getFullYear() - 2012
+  return {
+    reinhartRogoff: reinhartRogoffScore(signals),
+    acemoglu: acemogluDisplacementScore(signals),
+    nordhaus: nordhausDamageFunction(signals.tempAnomalyC),
+    richardson: richardsonArmsDynamics(signals),
+    brynjolfsson: brynjolfssonJCurve(signals, aiEraYear),
+    dalio: dalioCyclePosition(signals)
+  }
+}
+
+const computeCompositeScore = (
+  pattern: HistoricalPattern,
+  signals: CurrentSignals,
+  modelOutputs: ModelOutputs,
+  contextEvents?: ContextEvent[]
+) => {
+  const mseScore = computeMSEScore(pattern, signals) * 0.4
+
+  const rrBoost = ['great_depression_eve', 'gfc_2008', 'dotcom_bubble'].includes(pattern.id)
+    ? modelOutputs.reinhartRogoff.riskScore * 0.15
+    : 0
+
+  const richardsonBoost =
+    ['ww1_eve', 'ww2_marshall', 'ukraine_war_2022', 'iran_war_2026', 'cold_war_stable'].includes(pattern.id)
+      ? modelOutputs.richardson.warProbability12mo * 0.15
+      : 0
+
+  const techBoost = ['dotcom_bubble', 'engles_pause_industrial', 'ai_displacement_now'].includes(pattern.id)
+    ? modelOutputs.brynjolfsson.currentPhase === 'reorganisation'
+      ? 0.15
+      : 0.05
+    : 0
+
+  const dalioBoost = ['great_depression_eve', 'gfc_2008', 'ussr_collapse'].includes(pattern.id)
+    ? modelOutputs.dalio.cycleRisk * 0.15
+    : 0
+
+  const baseScore = mseScore + rrBoost + richardsonBoost + techBoost + dalioBoost
+  const contextBoost = scoreContextBoost(pattern, contextEvents)
+  return Math.min(1, baseScore + contextBoost)
+}
+
+export const getMostAlarmedModel = (outputs: ModelOutputs) => {
+  const scores = [
+    { name: 'Reinhart-Rogoff debt', value: outputs.reinhartRogoff.riskScore },
+    { name: 'Acemoglu displacement', value: outputs.acemoglu.displacementRisk },
+    { name: 'Nordhaus climate', value: outputs.nordhaus / 5 },
+    { name: 'Richardson arms', value: outputs.richardson.warProbability12mo },
+    { name: 'Dalio debt cycle', value: outputs.dalio.cycleRisk }
+  ]
+
+  return scores.sort((a, b) => b.value - a.value)[0]
+}
+
+export const findAnalogies = (
+  current: CurrentSignals,
+  topN = 3,
+  contextEvents?: ContextEvent[],
+  modelOutputs?: ModelOutputs
+): MatchedPattern[] => {
+  const outputs = modelOutputs ?? computeAllModels(current)
+
   const scored = PATTERN_LIBRARY.map((pattern) => {
-    const keys = Object.keys(pattern.signals) as Array<keyof CurrentSignals>
-    const diffs: number[] = []
-
-    keys.forEach((key) => {
-      const patternValue = pattern.signals[key]
-      const currentValue = current[key]
-      if (patternValue === undefined || currentValue === undefined) return
-      const normalizedCurrent = normalize(key, currentValue)
-      const normalizedPattern = normalize(key, patternValue)
-      diffs.push(Math.pow(normalizedCurrent - normalizedPattern, 2))
-    })
-
-    const meanSquaredDifference = diffs.length ? diffs.reduce((sum, diff) => sum + diff, 0) / diffs.length : 1
-    const analogyScore = 1 / (1 + meanSquaredDifference)
-
+    const analogyScore = computeCompositeScore(pattern, current, outputs, contextEvents)
     return { ...pattern, analogyScore }
   })
 
@@ -398,7 +656,8 @@ export const findAnalogies = (current: CurrentSignals, topN = 3): MatchedPattern
 const buildScenario = (
   label: 'mostLikely' | 'optimistic' | 'pessimistic',
   topAnalogies: MatchedPattern[],
-  current: CurrentSignals
+  current: CurrentSignals,
+  modelOutputs: ModelOutputs
 ): ScenarioOutcome => {
   const base = topAnalogies[0]
   const weightedGDP = weightedAverage(topAnalogies, (item) => item.gdpChange1yr)
@@ -408,15 +667,25 @@ const buildScenario = (
   if (label === 'optimistic') adjustment = 1.2
   if (label === 'pessimistic') adjustment = -1.6
 
-  const gdpGrowthNextYear = Number((weightedGDP + adjustment).toFixed(2))
-  const oilPriceNextYear = Number((current.oilPrice * (1 + weightedConflict / 300) + adjustment * 3).toFixed(2))
-  const conflictTrend = conflictTrendFromChange(weightedConflict + adjustment * 6)
+  let gdpGrowthNextYear = weightedGDP + adjustment
+  gdpGrowthNextYear += modelOutputs.reinhartRogoff.gdpPenalty
+  const climateDrag = modelOutputs.nordhaus
+  gdpGrowthNextYear -= climateDrag
+
+  if (current.tempAnomalyC > 2.0) {
+    const tippingMultiplier = 1 + (current.tempAnomalyC - 2.0) * 0.5
+    gdpGrowthNextYear -= climateDrag * tippingMultiplier
+  }
+
+  const conflictAdjustment = weightedConflict + modelOutputs.richardson.conflictAcceleration * 5
+  const oilPriceNextYear = current.oilPrice * (1 + conflictAdjustment / 300) + adjustment * 3
+  const conflictTrend = conflictTrendFromChange(conflictAdjustment + adjustment * 6)
 
   return {
     probability: label === 'mostLikely' ? 0.52 : label === 'optimistic' ? 0.24 : 0.24,
-    gdpGrowthNextYear,
+    gdpGrowthNextYear: Number(gdpGrowthNextYear.toFixed(2)),
     conflictTrend,
-    oilPriceNextYear,
+    oilPriceNextYear: Number(oilPriceNextYear.toFixed(2)),
     headline:
       label === 'mostLikely'
         ? `Signals align most with ${base.name}, implying ${conflictTrend} conflict and moderate growth.`
@@ -431,11 +700,15 @@ const buildScenario = (
   }
 }
 
-export const generatePrediction = (current: CurrentSignals): TimeMachinePrediction => {
-  const topAnalogies = findAnalogies(current, 3)
-  const mostLikely = buildScenario('mostLikely', topAnalogies, current)
-  const optimistic = buildScenario('optimistic', topAnalogies, current)
-  const pessimistic = buildScenario('pessimistic', topAnalogies, current)
+export const generatePrediction = (
+  current: CurrentSignals,
+  contextEvents?: ContextEvent[]
+): TimeMachinePrediction => {
+  const modelOutputs = computeAllModels(current)
+  const topAnalogies = findAnalogies(current, 3, contextEvents, modelOutputs)
+  const mostLikely = buildScenario('mostLikely', topAnalogies, current, modelOutputs)
+  const optimistic = buildScenario('optimistic', topAnalogies, current, modelOutputs)
+  const pessimistic = buildScenario('pessimistic', topAnalogies, current, modelOutputs)
 
   const keyRisks: Risk[] = []
   if (current.oilPrice > 100) {
@@ -453,6 +726,12 @@ export const generatePrediction = (current: CurrentSignals): TimeMachinePredicti
   if (current.populismIndex > 7) {
     keyRisks.push({ label: 'Political rupture risk — similar to 1930s', severity: 'medium' })
   }
+  if (modelOutputs.reinhartRogoff.riskScore > 0.4) {
+    keyRisks.push({ label: 'Debt crisis risk — Reinhart-Rogoff thresholds breached', severity: 'high' })
+  }
+  if (modelOutputs.richardson.warProbability12mo > 0.35) {
+    keyRisks.push({ label: 'Arms race escalation risk — Richardson dynamics intensifying', severity: 'high' })
+  }
 
   const keyOpportunities: Opportunity[] = []
   if (current.aiInvestmentBillions > 300 && current.unemploymentRate < 6) {
@@ -463,6 +742,9 @@ export const generatePrediction = (current: CurrentSignals): TimeMachinePredicti
   }
   if (current.tempAnomalyC < 1.5) {
     keyOpportunities.push({ label: 'Climate transition window still open', severity: 'low' })
+  }
+  if (modelOutputs.brynjolfsson.currentPhase === 'harvest') {
+    keyOpportunities.push({ label: 'GPT harvest phase — productivity unlocks accelerating', severity: 'medium' })
   }
 
   const confidenceScore = Math.round((topAnalogies[0]?.analogyScore ?? 0) * 100)
@@ -476,6 +758,7 @@ export const generatePrediction = (current: CurrentSignals): TimeMachinePredicti
     },
     keyRisks,
     keyOpportunities,
-    confidenceScore
+    confidenceScore,
+    modelOutputs
   }
 }

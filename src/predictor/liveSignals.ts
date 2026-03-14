@@ -25,14 +25,62 @@ const requireEnv = (key: string) => {
   return value as string
 }
 
-async function fetchOilPrice(): Promise<number> {
-  const response = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/CL=F')
+const oilCache: { value: number; timestamp: number } = { value: 0, timestamp: 0 }
+const OIL_CACHE_TTL_MS = 60 * 60 * 1000
+
+const getCachedOil = () => {
+  if (oilCache.value && Date.now() - oilCache.timestamp < OIL_CACHE_TTL_MS) {
+    return oilCache.value
+  }
+  return null
+}
+
+const setCachedOil = (value: number) => {
+  oilCache.value = value
+  oilCache.timestamp = Date.now()
+}
+
+const fetchOilFromYahoo = async () => {
+  const response = await fetch('/api/yahoo/v8/finance/chart/CL=F')
   const data = await parseJson(response)
   const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice
   if (typeof price !== 'number') {
     throw new Error('Oil price missing')
   }
   return price
+}
+
+const fetchOilFromStooq = async () => {
+  const response = await fetch('/api/stooq/q/l/?s=cl.f&f=sd2t2ohlcv&h&e=csv')
+  if (!response.ok) {
+    throw new Error(`Stooq request failed: ${response.status}`)
+  }
+  const text = await response.text()
+  const lines = text.trim().split('\n')
+  if (lines.length < 2) {
+    throw new Error('Stooq data missing')
+  }
+  const columns = lines[1].split(',')
+  const close = Number(columns[6])
+  if (Number.isNaN(close)) {
+    throw new Error('Stooq price invalid')
+  }
+  return close
+}
+
+async function fetchOilPrice(): Promise<number> {
+  const cached = getCachedOil()
+  if (cached !== null) return cached
+
+  try {
+    const price = await fetchOilFromYahoo()
+    setCachedOil(price)
+    return price
+  } catch {
+    const price = await fetchOilFromStooq()
+    setCachedOil(price)
+    return price
+  }
 }
 
 async function fetchGlobalGDP(): Promise<number> {
@@ -50,7 +98,7 @@ async function fetchGlobalGDP(): Promise<number> {
 async function fetchInflationRate(): Promise<number> {
   const apiKey = requireEnv('VITE_FRED_API_KEY')
   const response = await fetch(
-    `https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&api_key=${apiKey}&limit=2&sort_order=desc&file_type=json`
+    `/api/fred/fred/series/observations?series_id=CPIAUCSL&api_key=${apiKey}&limit=2&sort_order=desc&file_type=json`
   )
   const data = await parseJson(response)
   const observations = data?.observations
@@ -66,7 +114,7 @@ async function fetchInflationRate(): Promise<number> {
 async function fetchUnemploymentRate(): Promise<number> {
   const apiKey = requireEnv('VITE_FRED_API_KEY')
   const response = await fetch(
-    `https://api.stlouisfed.org/fred/series/observations?series_id=UNRATE&api_key=${apiKey}&limit=1&sort_order=desc&file_type=json`
+    `/api/fred/fred/series/observations?series_id=UNRATE&api_key=${apiKey}&limit=1&sort_order=desc&file_type=json`
   )
   const data = await parseJson(response)
   const value = data?.observations?.[0]?.value
@@ -124,7 +172,7 @@ async function fetchActiveWarCount(): Promise<number> {
 
 async function fetchTempAnomaly(): Promise<number> {
   const response = await fetch(
-    'https://climate-api.open-meteo.com/v1/climate?latitude=0&longitude=0&start_date=2024-01-01&end_date=2024-12-31&models=CMIP6&daily=temperature_2m_mean'
+    '/api/open-meteo/v1/climate?latitude=0&longitude=0&start_date=2024-01-01&end_date=2024-12-31&models=EC_Earth3P_HR&daily=temperature_2m_mean'
   )
   const data = await parseJson(response)
   const temps: number[] | undefined = data?.daily?.temperature_2m_mean

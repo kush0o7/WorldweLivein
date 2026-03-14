@@ -8,8 +8,8 @@ import {
   TimeMachinePrediction
 } from '../predictor/timeMachine'
 import { fetchLiveSignals, generateNarrative } from '../predictor/liveSignals'
-import { fetchWikidataEvents } from '../worlds/wikidataAnchors'
 import { runSensitivityAnalysis, SensitivityResult } from '../predictor/sensitivity'
+import { fetchLocalEventkgEvents } from '../worlds/localEventkg'
 
 const inputFields: Array<{ key: keyof CurrentSignals; label: string; suffix?: string; source?: string }> = [
   { key: 'oilPrice', label: 'Oil Price', suffix: '$/barrel', source: 'Yahoo Finance' },
@@ -68,8 +68,7 @@ const liveFields: Array<keyof CurrentSignals> = [
   'globalGDPGrowth',
   'inflationRate',
   'unemploymentRate',
-  'activeWarCount',
-  'tempAnomalyC'
+  'activeWarCount'
 ]
 
 const STALE_THRESHOLD_MS = 60 * 60 * 1000
@@ -190,23 +189,34 @@ export default function TimeMachine() {
     fetchSignals()
   }, [])
 
+  const getSignalWarnings = (values: CurrentSignals) => {
+    const warnings: string[] = []
+    if (values.tempAnomalyC > 4) warnings.push(`Temp anomaly ${values.tempAnomalyC}°C is unrealistic — cap at 4.0`)
+    if (values.globalGDPGrowth < -10) warnings.push(`GDP growth ${values.globalGDPGrowth}% is extreme — check input`)
+    if (values.inflationRate < 0.5 && values.inflationRate > 0) {
+      warnings.push(`Inflation ${values.inflationRate}% looks like MoM not YoY — expected 2-8%`)
+    }
+    if (values.oilPrice < 20) warnings.push(`Oil $${values.oilPrice} is unusually low — check feed`)
+    return warnings
+  }
+
   useEffect(() => {
     const loadContext = async () => {
       setContextLoading(true)
       setContextError('')
       try {
-        const endYear = new Date().getFullYear()
-        const startYear = endYear - 10
-        const events = await fetchWikidataEvents(startYear, endYear, 80)
-        const mapped = events.map((event) => ({
+        const localEvents = await fetchLocalEventkgEvents()
+        const mappedLocal = localEvents.map((event) => ({
           label: event.label,
           description: event.description,
           date: event.date
         }))
-        setContextEvents(mapped)
-        setPrediction(generatePrediction(signals, mapped))
+        setContextEvents(mappedLocal)
+        if (mappedLocal.length > 0) {
+          setPrediction(generatePrediction(signals, mappedLocal))
+        }
       } catch (error) {
-        setContextError((error as Error).message || 'Failed to load Wikidata context')
+        setContextError((error as Error).message || 'Failed to load local event context')
       } finally {
         setContextLoading(false)
       }
@@ -228,9 +238,9 @@ export default function TimeMachine() {
           </button>
         </div>
         <div className="mt-2 text-xs text-slate-400">
-          {contextLoading && 'Loading Wikidata context...'}
-          {!contextLoading && contextError && `Wikidata context unavailable: ${contextError}`}
-          {!contextLoading && !contextError && contextEvents.length > 0 && 'Wikidata context loaded.'}
+          {contextLoading && 'Loading local event context...'}
+          {!contextLoading && contextError && `Local context unavailable: ${contextError}`}
+          {!contextLoading && !contextError && contextEvents.length > 0 && 'Local context loaded.'}
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           {inputFields.map((field) => {
@@ -263,6 +273,12 @@ export default function TimeMachine() {
                   }
                   className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"
                 />
+                {field.key === 'tempAnomalyC' && (
+                  <div className="mt-2 text-xs text-slate-500">
+                    NASA GISS shows +1.2°C as of 2026. Update manually from:
+                    <span className="ml-1 text-slate-400">climate.nasa.gov/vital-signs/global-temperature</span>
+                  </div>
+                )}
                 {field.key === 'techLayoffs12mo' && (
                   <div className="mt-2 text-xs text-slate-500">
                     Layoffs.fyi has no public API — using manual override.
@@ -272,6 +288,16 @@ export default function TimeMachine() {
             )
           })}
         </div>
+        {getSignalWarnings(signals).length > 0 && (
+          <div className="mb-3 rounded-lg border border-amber-400/30 bg-amber-500/10 p-3">
+            <div className="text-xs font-semibold text-amber-300">Signal warnings — review before running:</div>
+            {getSignalWarnings(signals).map((warning, index) => (
+              <div key={index} className="text-xs text-amber-400/80">
+                ⚠ {warning}
+              </div>
+            ))}
+          </div>
+        )}
         <button
           className="mt-5 rounded-full bg-white px-4 py-2 text-xs font-semibold text-slate-950"
           onClick={onRun}

@@ -99,6 +99,28 @@ export interface TimeMachinePrediction {
   modelOutputs: ModelOutputs
 }
 
+export const clampSignals = (raw: CurrentSignals): CurrentSignals => ({
+  ...raw,
+  tempAnomalyC: Math.max(0, Math.min(4.0, raw.tempAnomalyC)),
+  oilPrice: Math.max(5, Math.min(500, raw.oilPrice)),
+  globalGDPGrowth: Math.max(-15, Math.min(15, raw.globalGDPGrowth)),
+  inflationRate: Math.max(0, Math.min(50, raw.inflationRate)),
+  unemploymentRate: Math.max(0, Math.min(40, raw.unemploymentRate)),
+  nuclearThreatLevel: Math.max(0, Math.min(10, raw.nuclearThreatLevel)),
+  chipWarIntensity: Math.max(0, Math.min(10, raw.chipWarIntensity)),
+  populismIndex: Math.max(0, Math.min(10, raw.populismIndex)),
+  geopoliticalTension: Math.max(0, Math.min(10, raw.geopoliticalTension)),
+  tradeOpenness: Math.max(0, Math.min(100, raw.tradeOpenness)),
+  laborShareOfIncome: Math.max(20, Math.min(80, raw.laborShareOfIncome)),
+  publicDebtGdpRatio: Math.max(0, Math.min(300, raw.publicDebtGdpRatio)),
+  globalDebtToGdp: Math.max(0, Math.min(500, raw.globalDebtToGdp)),
+  externalDebtGdpRatio: Math.max(0, Math.min(200, raw.externalDebtGdpRatio)),
+  activeWarCount: Math.max(0, Math.min(30, raw.activeWarCount)),
+  conflictDeaths12mo: Math.max(0, Math.min(10_000_000, raw.conflictDeaths12mo)),
+  alliancePolarisation: Math.max(0, Math.min(10, raw.alliancePolarisation)),
+  reserveCurrencyTrend: Math.max(-10, Math.min(10, raw.reserveCurrencyTrend))
+})
+
 const NORMALIZATION_RANGES: Record<keyof CurrentSignals, [number, number]> = {
   oilPrice: [20, 200],
   globalGDPGrowth: [-10, 8],
@@ -701,29 +723,30 @@ const buildScenario = (
 }
 
 export const generatePrediction = (
-  current: CurrentSignals,
+  rawSignals: CurrentSignals,
   contextEvents?: ContextEvent[]
 ): TimeMachinePrediction => {
-  const modelOutputs = computeAllModels(current)
-  const topAnalogies = findAnalogies(current, 3, contextEvents, modelOutputs)
-  const mostLikely = buildScenario('mostLikely', topAnalogies, current, modelOutputs)
-  const optimistic = buildScenario('optimistic', topAnalogies, current, modelOutputs)
-  const pessimistic = buildScenario('pessimistic', topAnalogies, current, modelOutputs)
+  const signals = clampSignals(rawSignals)
+  const modelOutputs = computeAllModels(signals)
+  const topAnalogies = findAnalogies(signals, 3, contextEvents, modelOutputs)
+  const mostLikely = buildScenario('mostLikely', topAnalogies, signals, modelOutputs)
+  const optimistic = buildScenario('optimistic', topAnalogies, signals, modelOutputs)
+  const pessimistic = buildScenario('pessimistic', topAnalogies, signals, modelOutputs)
 
   const keyRisks: Risk[] = []
-  if (current.oilPrice > 100) {
+  if (signals.oilPrice > 100) {
     keyRisks.push({ label: 'Energy shock risk — similar to 1973, 2008', severity: 'high' })
   }
-  if (current.activeWarCount > 7) {
+  if (signals.activeWarCount > 7) {
     keyRisks.push({ label: 'Multi-front conflict risk — similar to 1939', severity: 'high' })
   }
-  if (current.aiInvestmentBillions > 400 && current.techLayoffs12mo > 20000) {
+  if (signals.aiInvestmentBillions > 400 && signals.techLayoffs12mo > 20000) {
     keyRisks.push({ label: "Engels' Pause risk — productivity lag likely", severity: 'medium' })
   }
-  if (current.nuclearThreatLevel > 6) {
+  if (signals.nuclearThreatLevel > 6) {
     keyRisks.push({ label: 'Nuclear escalation risk — limited precedent', severity: 'high' })
   }
-  if (current.populismIndex > 7) {
+  if (signals.populismIndex > 7) {
     keyRisks.push({ label: 'Political rupture risk — similar to 1930s', severity: 'medium' })
   }
   if (modelOutputs.reinhartRogoff.riskScore > 0.4) {
@@ -734,13 +757,13 @@ export const generatePrediction = (
   }
 
   const keyOpportunities: Opportunity[] = []
-  if (current.aiInvestmentBillions > 300 && current.unemploymentRate < 6) {
+  if (signals.aiInvestmentBillions > 300 && signals.unemploymentRate < 6) {
     keyOpportunities.push({ label: 'AI productivity upside if diffusion stays inclusive', severity: 'medium' })
   }
-  if (current.tradeOpenness > 60) {
+  if (signals.tradeOpenness > 60) {
     keyOpportunities.push({ label: 'Trade resilience could dampen shocks', severity: 'low' })
   }
-  if (current.tempAnomalyC < 1.5) {
+  if (signals.tempAnomalyC < 1.5) {
     keyOpportunities.push({ label: 'Climate transition window still open', severity: 'low' })
   }
   if (modelOutputs.brynjolfsson.currentPhase === 'harvest') {

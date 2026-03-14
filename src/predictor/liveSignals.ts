@@ -42,7 +42,10 @@ const setCachedOil = (value: number) => {
 
 const fetchOilFromYahoo = async () => {
   const response = await fetch('/api/yahoo/v8/finance/chart/CL=F')
-  const data = await parseJson(response)
+  if (!response.ok) {
+    throw new Error(`Yahoo request failed: ${response.status}`)
+  }
+  const data = await response.json()
   const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice
   if (typeof price !== 'number') {
     throw new Error('Oil price missing')
@@ -73,11 +76,11 @@ async function fetchOilPrice(): Promise<number> {
   if (cached !== null) return cached
 
   try {
-    const price = await fetchOilFromYahoo()
+    const price = await fetchOilFromStooq()
     setCachedOil(price)
     return price
   } catch {
-    const price = await fetchOilFromStooq()
+    const price = await fetchOilFromYahoo()
     setCachedOil(price)
     return price
   }
@@ -98,16 +101,19 @@ async function fetchGlobalGDP(): Promise<number> {
 async function fetchInflationRate(): Promise<number> {
   const apiKey = requireEnv('VITE_FRED_API_KEY')
   const response = await fetch(
-    `/api/fred/fred/series/observations?series_id=CPIAUCSL&api_key=${apiKey}&limit=2&sort_order=desc&file_type=json`
+    `/api/fred/fred/series/observations?series_id=CPIAUCSL&api_key=${apiKey}&limit=13&sort_order=desc&file_type=json`
   )
   const data = await parseJson(response)
   const observations = data?.observations
-  if (!Array.isArray(observations) || observations.length < 2) {
+  if (!Array.isArray(observations) || observations.length < 13) {
     throw new Error('Inflation observations missing')
   }
-  const latest = toNumber(observations[0]?.value)
-  const prev = toNumber(observations[1]?.value)
-  const rate = ((latest - prev) / prev) * 100
+  const latest = Number(observations[0]?.value)
+  const yearAgo = Number(observations[12]?.value)
+  if (Number.isNaN(latest) || Number.isNaN(yearAgo) || yearAgo === 0) {
+    throw new Error('Invalid CPI data')
+  }
+  const rate = (latest / yearAgo - 1) * 100
   return Number(rate.toFixed(2))
 }
 
@@ -158,7 +164,7 @@ async function fetchActiveWarCount(): Promise<number> {
   const query = encodeURIComponent(
     '(war OR conflict OR battle OR bombing OR shelling OR airstrike OR drone OR missile)'
   )
-  const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=TimelineVolRaw&timespan=30d&format=json`
+  const url = `/api/gdelt/api/v2/doc/doc?query=${query}&mode=TimelineVolRaw&timespan=30d&format=json`
   const response = await fetch(url)
   const data = await parseJson(response)
   const values = extractTimelineValues(data)
@@ -170,30 +176,15 @@ async function fetchActiveWarCount(): Promise<number> {
   return clamp(scaled, 0, 15)
 }
 
-async function fetchTempAnomaly(): Promise<number> {
-  const response = await fetch(
-    '/api/open-meteo/v1/climate?latitude=0&longitude=0&start_date=2024-01-01&end_date=2024-12-31&models=EC_Earth3P_HR&daily=temperature_2m_mean'
-  )
-  const data = await parseJson(response)
-  const temps: number[] | undefined = data?.daily?.temperature_2m_mean
-  if (!Array.isArray(temps) || temps.length === 0) {
-    throw new Error('Temperature data missing')
-  }
-  const avg = temps.reduce((sum, value) => sum + value, 0) / temps.length
-  const anomaly = avg - 14
-  return Number(anomaly.toFixed(2))
-}
-
 export async function fetchLiveSignals(): Promise<Partial<CurrentSignals>> {
   const results: Partial<CurrentSignals> = {}
 
-  const [oil, gdp, inflation, unemployment, wars, temp] = await Promise.allSettled([
+  const [oil, gdp, inflation, unemployment, wars] = await Promise.allSettled([
     fetchOilPrice(),
     fetchGlobalGDP(),
     fetchInflationRate(),
     fetchUnemploymentRate(),
-    fetchActiveWarCount(),
-    fetchTempAnomaly()
+    fetchActiveWarCount()
   ])
 
   if (oil.status === 'fulfilled') results.oilPrice = oil.value
@@ -201,7 +192,6 @@ export async function fetchLiveSignals(): Promise<Partial<CurrentSignals>> {
   if (inflation.status === 'fulfilled') results.inflationRate = inflation.value
   if (unemployment.status === 'fulfilled') results.unemploymentRate = unemployment.value
   if (wars.status === 'fulfilled') results.activeWarCount = wars.value
-  if (temp.status === 'fulfilled') results.tempAnomalyC = temp.value
 
   return results
 }

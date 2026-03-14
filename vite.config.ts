@@ -28,6 +28,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/open-meteo/, '')
       },
+      '/api/gdelt': {
+        target: 'https://api.gdeltproject.org',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/gdelt/, '')
+      },
       '/api/stooq': {
         target: 'https://stooq.com',
         changeOrigin: true,

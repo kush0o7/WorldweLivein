@@ -7,6 +7,7 @@ import { HISTORICAL_ANCHORS } from './worlds/historicalData'
 import { useSimulationStore } from './store/simulationStore'
 import { SimResult } from './worlds/worldEngine'
 import { fetchWikidataEvents, WikidataEvent } from './worlds/wikidataAnchors'
+import { fetchLocalEventkgEvents, LocalEvent } from './worlds/localEventkg'
 
 const tabs = ['Worlds', 'Projections', 'Historical Anchors', 'Live Inputs', 'Event Cascade', 'Time Machine'] as const
 
@@ -19,6 +20,8 @@ export default function App() {
   const [wikidataLoading, setWikidataLoading] = useState(false)
   const [wikidataError, setWikidataError] = useState<string>('')
   const [wikidataRange, setWikidataRange] = useState({ start: 1900, end: 2025 })
+  const [localEvents, setLocalEvents] = useState<LocalEvent[]>([])
+  const [localLoading, setLocalLoading] = useState(false)
 
   const {
     worlds,
@@ -52,12 +55,22 @@ export default function App() {
     setWikidataLoading(true)
     setWikidataError('')
     try {
-      const events = await fetchWikidataEvents(wikidataRange.start, wikidataRange.end, 60)
+      const events = await fetchWikidataEvents(wikidataRange.start, wikidataRange.end, 30)
       setWikidataEvents(events)
     } catch (error) {
       setWikidataError((error as Error).message || 'Failed to load Wikidata events')
     } finally {
       setWikidataLoading(false)
+    }
+  }
+
+  const loadLocalEvents = async () => {
+    setLocalLoading(true)
+    try {
+      const events = await fetchLocalEventkgEvents()
+      setLocalEvents(events)
+    } finally {
+      setLocalLoading(false)
     }
   }
 
@@ -151,6 +164,39 @@ export default function App() {
 
         {activeTab === 'Historical Anchors' && (
           <section className="space-y-4">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-glow">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-white">Local EventKG Dataset</div>
+                  <div className="mt-1 text-xs text-slate-400">
+                    Uses a locally cached EventKG export. Run the dataset script once to populate.
+                  </div>
+                </div>
+                <button
+                  className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200"
+                  onClick={loadLocalEvents}
+                  disabled={localLoading}
+                >
+                  {localLoading ? 'Loading...' : 'Load Local Events'}
+                </button>
+              </div>
+              {localEvents.length > 0 && (
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {localEvents.slice(0, 30).map((event) => (
+                    <div
+                      key={event.id}
+                      className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-slate-300"
+                    >
+                      <div className="text-slate-400">{event.date || '—'}</div>
+                      <div className="mt-1 text-sm font-semibold text-white">{event.label}</div>
+                      {event.description && (
+                        <div className="mt-1 text-xs text-slate-400">{event.description}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-glow">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>

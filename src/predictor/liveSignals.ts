@@ -103,10 +103,11 @@ const fetchOilFromStooq = async () => {
   return close
 }
 
-async function fetchOilPrice(): Promise<number> {
-  const cached = getCachedOil()
-  if (cached !== null) return cached
-
+async function fetchOilPrice(force?: boolean): Promise<number> {
+  if (!force) {
+    const cached = getCachedOil()
+    if (cached !== null) return cached
+  }
   try {
     const price = await fetchOilFromStooq()
     setCachedOil(price)
@@ -232,9 +233,9 @@ const extractTimelineValues = (data: unknown): number[] => {
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
-async function fetchActiveWarCount(): Promise<number> {
+async function fetchActiveWarCount(force?: boolean): Promise<number> {
   const cached = getCachedWarCount()
-  if (cached !== null) return cached
+  if (cached !== null && !force) return cached
 
   const query = encodeURIComponent(
     '(war OR conflict OR battle OR bombing OR shelling OR airstrike OR drone OR missile)'
@@ -245,7 +246,9 @@ async function fetchActiveWarCount(): Promise<number> {
     if (response.status === 429) {
       const fallback = getCachedWarCount()
       if (fallback !== null) return fallback
-      return 9
+      const defaultValue = 9
+      setCachedWarCount(defaultValue)
+      return defaultValue
     }
     throw new Error(`GDELT failed: ${response.status}`)
   }
@@ -261,8 +264,9 @@ async function fetchActiveWarCount(): Promise<number> {
   return result
 }
 
-export async function fetchLiveSignals(): Promise<Partial<CurrentSignals>> {
+export async function fetchLiveSignals(options?: { force?: boolean }): Promise<Partial<CurrentSignals>> {
   const results: Partial<CurrentSignals> = {}
+  const force = options?.force ?? false
 
   const [
     oil,
@@ -282,11 +286,11 @@ export async function fetchLiveSignals(): Promise<Partial<CurrentSignals>> {
     policyRate
   ] =
     await Promise.allSettled([
-    fetchOilPrice(),
+    fetchOilPrice(force),
     fetchGlobalGDP(),
     fetchInflationRate(),
     fetchUnemploymentRate(),
-    fetchActiveWarCount(),
+    fetchActiveWarCount(force),
     fetchGdpGrowth('USA'),
     fetchGdpGrowth('EUU'),
     fetchGdpGrowth('CHN'),
@@ -322,6 +326,18 @@ export async function fetchLiveSignals(): Promise<Partial<CurrentSignals>> {
   if (policyRate.status === 'fulfilled') results.policyRate = policyRate.value
 
   return results
+}
+
+export const clearLiveCaches = () => {
+  oilCache.value = 0
+  oilCache.timestamp = 0
+  warCache.value = 0
+  warCache.timestamp = 0
+  try {
+    localStorage.removeItem(WAR_CACHE_KEY)
+  } catch {
+    // ignore storage errors
+  }
 }
 
 export function generateNarrative(signals: CurrentSignals, prediction: TimeMachinePrediction): string {

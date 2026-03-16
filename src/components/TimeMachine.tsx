@@ -7,7 +7,7 @@ import {
   generatePrediction,
   TimeMachinePrediction
 } from '../predictor/timeMachine'
-import { fetchLiveSignals, generateNarrative } from '../predictor/liveSignals'
+import { clearLiveCaches, fetchLiveSignals, generateNarrative } from '../predictor/liveSignals'
 import { runSensitivityAnalysis, SensitivityResult } from '../predictor/sensitivity'
 import { fetchLocalEventkgEvents } from '../worlds/localEventkg'
 import { loadCalibration } from '../predictor/calibration'
@@ -183,22 +183,27 @@ export default function TimeMachine() {
   const [backtest, setBacktest] = useState<BacktestSummary | null>(null)
   const [shockCalibration, setShockCalibration] = useState<ShockCalibration | null>(null)
   const [quantCore, setQuantCore] = useState<QuantCoreResult>(() => runQuantCore(DEFAULT_SIGNALS))
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null)
 
   const confidenceStyle = useMemo(
     () => ({ width: `${prediction.confidenceScore}%` }),
     [prediction.confidenceScore]
   )
 
-  const onRun = () => {
-    const result = generatePrediction(signals, contextEvents)
+  const onRun = async () => {
+    const liveData = await fetchSignals({ force: true })
+    const merged = { ...signals, ...liveData }
+    setSignals(merged)
+
+    const result = generatePrediction(merged, contextEvents)
     setPrediction(result)
     setRunToken(Date.now())
     setNarrativeError('')
     try {
-      const text = generateNarrative(signals, result)
+      const text = generateNarrative(merged, result)
       setNarrative(text)
-      setSensitivity(runSensitivityAnalysis(signals))
-      setQuantCore(runQuantCore(signals, 8, 200, shockCalibration ?? undefined))
+      setSensitivity(runSensitivityAnalysis(merged))
+      setQuantCore(runQuantCore(merged, 8, 200, shockCalibration ?? undefined))
     } catch (error) {
       setNarrativeError((error as Error).message || 'Failed to generate briefing')
     }
@@ -235,10 +240,10 @@ export default function TimeMachine() {
     return Date.now() - fetchedAt > STALE_THRESHOLD_MS ? 'stale' : 'live'
   }
 
-  const fetchSignals = async () => {
+  const fetchSignals = async (options?: { force?: boolean }) => {
     setLoading(true)
     try {
-      const liveData = await fetchLiveSignals()
+      const liveData = await fetchLiveSignals(options)
       const now = Date.now()
 
       setSignals((prev) => ({
@@ -265,6 +270,8 @@ export default function TimeMachine() {
         })
         return next
       })
+      setLastUpdated(now)
+      return liveData
     } finally {
       setLoading(false)
     }
@@ -282,6 +289,13 @@ export default function TimeMachine() {
       setQuantCore(runQuantCore(fromUrl, 8, 200, shockCalibration ?? undefined))
     }
     fetchSignals()
+  }, [])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      fetchSignals()
+    }, 10 * 60 * 1000)
+    return () => window.clearInterval(interval)
   }, [])
 
   useEffect(() => {
@@ -385,7 +399,7 @@ export default function TimeMachine() {
           <div className="text-sm font-semibold text-white">Signal Input Panel</div>
           <button
             className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200"
-            onClick={fetchSignals}
+            onClick={() => fetchSignals()}
             disabled={loading}
           >
             {loading ? 'Refreshing...' : 'Refresh live data'}
@@ -396,8 +410,22 @@ export default function TimeMachine() {
           {!contextLoading && contextError && `Local context unavailable: ${contextError}`}
           {!contextLoading && !contextError && contextEvents.length > 0 && 'Local context loaded.'}
         </div>
-        <div className="mt-1 text-xs text-slate-500">
-          Calibration: {calibrationStatus === 'ready' ? 'loaded' : 'missing'}
+        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+          <span>Calibration: {calibrationStatus === 'ready' ? 'loaded' : 'missing'}</span>
+          {lastUpdated && (
+            <span>
+              Last updated: {new Date(lastUpdated).toLocaleTimeString()}
+            </span>
+          )}
+          <button
+            className="rounded-full border border-white/10 px-3 py-1 text-[11px] font-semibold text-slate-200"
+            onClick={() => {
+              clearLiveCaches()
+              fetchSignals({ force: true })
+            }}
+          >
+            Force refresh (ignore cache)
+          </button>
         </div>
         <div className="mt-4 space-y-6">
           {inputSections.map((section) => (

@@ -17,14 +17,6 @@ const toNumber = (value: string | number) => {
 
 const formatDate = (date: Date) => date.toISOString().slice(0, 10)
 
-const requireEnv = (key: string) => {
-  const value = import.meta.env[key]
-  if (!value) {
-    throw new Error(`Missing ${key}`)
-  }
-  return String(value).trim()
-}
-
 const oilCache: { value: number; timestamp: number } = { value: 0, timestamp: 0 }
 const OIL_CACHE_TTL_MS = 60 * 60 * 1000
 const warCache: { value: number; timestamp: number } = { value: 0, timestamp: 0 }
@@ -153,9 +145,8 @@ const fetchUnemployment = (country: string) =>
   fetchWorldBankIndicator(country, 'SL.UEM.TOTL.ZS')
 
 async function fetchInflationRate(): Promise<number> {
-  const apiKey = requireEnv('VITE_FRED_API_KEY')
   const response = await fetch(
-    `/api/fred/fred/series/observations?series_id=CPIAUCSL&api_key=${apiKey}&limit=13&sort_order=desc&file_type=json`
+    `/api/fred/fred/series/observations?series_id=CPIAUCSL&limit=13&sort_order=desc&file_type=json`
   )
   const data = await parseJson(response)
   const observations = data?.observations
@@ -172,9 +163,8 @@ async function fetchInflationRate(): Promise<number> {
 }
 
 async function fetchUnemploymentRate(): Promise<number> {
-  const apiKey = requireEnv('VITE_FRED_API_KEY')
   const response = await fetch(
-    `/api/fred/fred/series/observations?series_id=UNRATE&api_key=${apiKey}&limit=1&sort_order=desc&file_type=json`
+    `/api/fred/fred/series/observations?series_id=UNRATE&limit=1&sort_order=desc&file_type=json`
   )
   const data = await parseJson(response)
   const value = data?.observations?.[0]?.value
@@ -182,9 +172,8 @@ async function fetchUnemploymentRate(): Promise<number> {
 }
 
 const fetchFredSeriesLatest = async (seriesId: string): Promise<number> => {
-  const apiKey = requireEnv('VITE_FRED_API_KEY')
   const response = await fetch(
-    `/api/fred/fred/series/observations?series_id=${seriesId}&api_key=${apiKey}&limit=1&sort_order=desc&file_type=json`
+    `/api/fred/fred/series/observations?series_id=${seriesId}&limit=1&sort_order=desc&file_type=json`
   )
   const data = await parseJson(response)
   const value = data?.observations?.[0]?.value

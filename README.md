@@ -38,7 +38,7 @@ Open `http://localhost:5173`.
 Create `.env` (kept local, gitignored):
 
 ```
-VITE_FRED_API_KEY=your_key_here
+FRED_API_KEY=your_key_here
 ```
 
 Use `.env.example` as reference.
@@ -79,7 +79,7 @@ See `docs/`:
 ## Vercel
 - Build: `npm run build`
 - Output: `dist`
-- Add env var: `VITE_FRED_API_KEY`
+- Add env var: `FRED_API_KEY`
 
 ## Netlify
 - Build: `npm run build`

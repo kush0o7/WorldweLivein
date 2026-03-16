@@ -10,22 +10,73 @@ import {
 import { fetchLiveSignals, generateNarrative } from '../predictor/liveSignals'
 import { runSensitivityAnalysis, SensitivityResult } from '../predictor/sensitivity'
 import { fetchLocalEventkgEvents } from '../worlds/localEventkg'
+import { loadCalibration } from '../predictor/calibration'
+import { runBacktest, BacktestSummary, HistoricalRow } from '../predictor/backtest'
+import { runQuantCore, QuantCoreResult, ShockCalibration } from '../predictor/quantCore'
+import { computeShockCalibration } from '../predictor/shockCalibration'
 
-const inputFields: Array<{ key: keyof CurrentSignals; label: string; suffix?: string; source?: string }> = [
-  { key: 'oilPrice', label: 'Oil Price', suffix: '$/barrel', source: 'Yahoo Finance' },
-  { key: 'globalGDPGrowth', label: 'Global GDP Growth', suffix: '% YoY', source: 'World Bank' },
-  { key: 'inflationRate', label: 'Inflation Rate', suffix: '%', source: 'FRED' },
-  { key: 'unemploymentRate', label: 'Unemployment Rate', suffix: '%', source: 'FRED' },
-  { key: 'activeWarCount', label: 'Active War Count', source: 'GDELT (news volume proxy)' },
-  { key: 'conflictDeaths12mo', label: 'Conflict Deaths (12 mo)' },
-  { key: 'nuclearThreatLevel', label: 'Nuclear Threat Level', suffix: '0-10' },
-  { key: 'aiInvestmentBillions', label: 'AI Investment', suffix: '$B' },
-  { key: 'techLayoffs12mo', label: 'Tech Layoffs (12 mo)' },
-  { key: 'chipWarIntensity', label: 'Chip War Intensity', suffix: '0-10' },
-  { key: 'populismIndex', label: 'Populism Index', suffix: '0-10' },
-  { key: 'tradeOpenness', label: 'Trade Openness', suffix: '0-100' },
-  { key: 'geopoliticalTension', label: 'Geopolitical Tension', suffix: '0-10' },
-  { key: 'tempAnomalyC', label: 'Temp Anomaly', suffix: '°C', source: 'Open-Meteo' }
+type InputField = { key: keyof CurrentSignals; label: string; suffix?: string; source?: string }
+
+const inputSections: Array<{ title: string; fields: InputField[] }> = [
+  {
+    title: 'Core Signals',
+    fields: [
+      { key: 'oilPrice', label: 'Oil Price', suffix: '$/barrel', source: 'Yahoo Finance' },
+      { key: 'globalGDPGrowth', label: 'Global GDP Growth', suffix: '% YoY', source: 'World Bank' },
+      { key: 'inflationRate', label: 'Inflation Rate', suffix: '%', source: 'FRED' },
+      { key: 'unemploymentRate', label: 'Unemployment Rate', suffix: '%', source: 'FRED' },
+      { key: 'activeWarCount', label: 'Active War Count', source: 'GDELT (news volume proxy)' },
+      { key: 'conflictDeaths12mo', label: 'Conflict Deaths (12 mo)' },
+      { key: 'nuclearThreatLevel', label: 'Nuclear Threat Level', suffix: '0-10' },
+      { key: 'aiInvestmentBillions', label: 'AI Investment', suffix: '$B' },
+      { key: 'techLayoffs12mo', label: 'Tech Layoffs (12 mo)' },
+      { key: 'chipWarIntensity', label: 'Chip War Intensity', suffix: '0-10' },
+      { key: 'populismIndex', label: 'Populism Index', suffix: '0-10' },
+      { key: 'tradeOpenness', label: 'Trade Openness', suffix: '0-100' },
+      { key: 'geopoliticalTension', label: 'Geopolitical Tension', suffix: '0-10' },
+      { key: 'tempAnomalyC', label: 'Temp Anomaly', suffix: '°C', source: 'NASA GISS (manual)' }
+    ]
+  },
+  {
+    title: 'Advanced Economic Indicators',
+    fields: [
+      { key: 'publicDebtGdpRatio', label: 'Public Debt/GDP', suffix: '%' },
+      { key: 'creditGrowthRate', label: 'Credit Growth', suffix: '% YoY' },
+      { key: 'externalDebtGdpRatio', label: 'External Debt/GDP', suffix: '%' },
+      { key: 'robotsPer1000Workers', label: 'Robots per 1k', suffix: 'per 1k' },
+      { key: 'laborShareOfIncome', label: 'Labor Share', suffix: '% of GDP' },
+      { key: 'militarySpendingGrowth', label: 'Military Spend Growth', suffix: '% YoY' },
+      { key: 'alliancePolarisation', label: 'Alliance Polarisation', suffix: '0-10' },
+      { key: 'globalDebtToGdp', label: 'Global Debt/GDP', suffix: '%' },
+      { key: 'reserveCurrencyTrend', label: 'Reserve Currency Trend', suffix: '-10 to +10' },
+      { key: 'giniCoefficient', label: 'Gini Coefficient', suffix: '0-100' }
+    ]
+  },
+  {
+    title: 'Bloc Macro Inputs',
+    fields: [
+      { key: 'usGDPGrowth', label: 'US GDP Growth', suffix: '% YoY', source: 'World Bank' },
+      { key: 'euGDPGrowth', label: 'EU GDP Growth', suffix: '% YoY', source: 'World Bank' },
+      { key: 'chinaGDPGrowth', label: 'China GDP Growth', suffix: '% YoY', source: 'World Bank' },
+      { key: 'usInflation', label: 'US Inflation', suffix: '%', source: 'FRED' },
+      { key: 'euInflation', label: 'EU Inflation', suffix: '%', source: 'World Bank' },
+      { key: 'chinaInflation', label: 'China Inflation', suffix: '%', source: 'World Bank' },
+      { key: 'usUnemployment', label: 'US Unemployment', suffix: '%', source: 'FRED' },
+      { key: 'euUnemployment', label: 'EU Unemployment', suffix: '%', source: 'World Bank' },
+      { key: 'chinaUnemployment', label: 'China Unemployment', suffix: '%', source: 'World Bank' },
+      { key: 'usDebtGdpRatio', label: 'US Debt/GDP', suffix: '%' },
+      { key: 'euDebtGdpRatio', label: 'EU Debt/GDP', suffix: '%' },
+      { key: 'chinaDebtGdpRatio', label: 'China Debt/GDP', suffix: '%' }
+    ]
+  },
+  {
+    title: 'Market Signals',
+    fields: [
+      { key: 'yieldCurve10y2y', label: 'Yield Curve (10y-2y)', suffix: '%', source: 'FRED' },
+      { key: 'creditSpreadBaaAaa', label: 'Credit Spread (BAA-AAA)', suffix: '%', source: 'FRED' },
+      { key: 'policyRate', label: 'Policy Rate', suffix: '%', source: 'FRED' }
+    ]
+  }
 ]
 
 const severityColors: Record<string, string> = {
@@ -60,7 +111,33 @@ const buildDefaultStatus = (): StatusMap => ({
   populismIndex: 'manual',
   tradeOpenness: 'manual',
   geopoliticalTension: 'manual',
-  tempAnomalyC: 'manual'
+  tempAnomalyC: 'manual',
+  publicDebtGdpRatio: 'manual',
+  creditGrowthRate: 'manual',
+  externalDebtGdpRatio: 'manual',
+  robotsPer1000Workers: 'manual',
+  laborShareOfIncome: 'manual',
+  militarySpendingGrowth: 'manual',
+  alliancePolarisation: 'manual',
+  globalDebtToGdp: 'manual',
+  reserveCurrencyTrend: 'manual',
+  giniCoefficient: 'manual',
+  usGDPGrowth: 'manual',
+  euGDPGrowth: 'manual',
+  chinaGDPGrowth: 'manual',
+  usInflation: 'manual',
+  euInflation: 'manual',
+  chinaInflation: 'manual',
+  usUnemployment: 'manual',
+  euUnemployment: 'manual',
+  chinaUnemployment: 'manual',
+  usDebtGdpRatio: 'manual',
+  euDebtGdpRatio: 'manual',
+  chinaDebtGdpRatio: 'manual',
+  aiAdoptionRate: 'manual',
+  yieldCurve10y2y: 'manual',
+  creditSpreadBaaAaa: 'manual',
+  policyRate: 'manual'
 })
 
 const liveFields: Array<keyof CurrentSignals> = [
@@ -68,7 +145,19 @@ const liveFields: Array<keyof CurrentSignals> = [
   'globalGDPGrowth',
   'inflationRate',
   'unemploymentRate',
-  'activeWarCount'
+  'activeWarCount',
+  'usGDPGrowth',
+  'euGDPGrowth',
+  'chinaGDPGrowth',
+  'usInflation',
+  'euInflation',
+  'chinaInflation',
+  'usUnemployment',
+  'euUnemployment',
+  'chinaUnemployment',
+  'yieldCurve10y2y',
+  'creditSpreadBaaAaa',
+  'policyRate'
 ]
 
 const STALE_THRESHOLD_MS = 60 * 60 * 1000
@@ -90,6 +179,10 @@ export default function TimeMachine() {
   const [sensitivity, setSensitivity] = useState<SensitivityResult[]>([])
   const [signalsFromUrl, setSignalsFromUrl] = useState(false)
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied'>('idle')
+  const [calibrationStatus, setCalibrationStatus] = useState<'loading' | 'ready' | 'missing'>('loading')
+  const [backtest, setBacktest] = useState<BacktestSummary | null>(null)
+  const [shockCalibration, setShockCalibration] = useState<ShockCalibration | null>(null)
+  const [quantCore, setQuantCore] = useState<QuantCoreResult>(() => runQuantCore(DEFAULT_SIGNALS))
 
   const confidenceStyle = useMemo(
     () => ({ width: `${prediction.confidenceScore}%` }),
@@ -105,6 +198,7 @@ export default function TimeMachine() {
       const text = generateNarrative(signals, result)
       setNarrative(text)
       setSensitivity(runSensitivityAnalysis(signals))
+      setQuantCore(runQuantCore(signals, 8, 200, shockCalibration ?? undefined))
     } catch (error) {
       setNarrativeError((error as Error).message || 'Failed to generate briefing')
     }
@@ -185,8 +279,39 @@ export default function TimeMachine() {
       setPrediction(result)
       setNarrative(generateNarrative(fromUrl, result))
       setSensitivity(runSensitivityAnalysis(fromUrl))
+      setQuantCore(runQuantCore(fromUrl, 8, 200, shockCalibration ?? undefined))
     }
     fetchSignals()
+  }, [])
+
+  useEffect(() => {
+    const initCalibration = async () => {
+      const coeffs = await loadCalibration()
+      setCalibrationStatus(coeffs ? 'ready' : 'missing')
+    }
+    initCalibration()
+  }, [])
+
+  useEffect(() => {
+    if (shockCalibration) {
+      setQuantCore(runQuantCore(signals, 8, 200, shockCalibration))
+    }
+  }, [shockCalibration])
+
+  useEffect(() => {
+    const loadBacktest = async () => {
+      try {
+        const response = await fetch(`/data/historical_worldbank.json?ts=${Date.now()}`, { cache: 'no-store' })
+        if (!response.ok) return
+        const data = (await response.json()) as HistoricalRow[]
+        const summary = runBacktest(data, DEFAULT_SIGNALS, 12)
+        setBacktest(summary)
+        setShockCalibration(computeShockCalibration(data))
+      } catch {
+        // ignore
+      }
+    }
+    loadBacktest()
   }, [])
 
   const getSignalWarnings = (values: CurrentSignals) => {
@@ -199,6 +324,35 @@ export default function TimeMachine() {
     if (values.oilPrice < 20) warnings.push(`Oil $${values.oilPrice} is unusually low — check feed`)
     return warnings
   }
+
+  const buildPlainSummary = () => {
+    const top = prediction.topAnalogies[0]
+    const gdp = prediction.scenarios.mostLikely.gdpGrowthNextYear
+    const oil = prediction.scenarios.mostLikely.oilPriceNextYear
+    const conflict = prediction.scenarios.mostLikely.conflictTrend
+    const regime =
+      quantCore.regimes.crisis > 30
+        ? 'elevated stress'
+        : quantCore.regimes.stressed > 35
+          ? 'fragile'
+          : 'steady'
+
+    const nowLine = `Right now the model reads the world as ${regime}, with ${signals.activeWarCount} active conflict zones and oil around $${signals.oilPrice}.`
+    const nearLine = `Over the next year it expects GDP growth around ${gdp}%, oil near $${oil}, and conflict ${conflict}.`
+    const analogyLine = top
+      ? `The closest historical comparison is ${top.name} (${top.period}) — meaning the main risk is ${top.keyLesson.toLowerCase()}`
+      : 'No strong historical analogy stands out.'
+
+    const watchItems = [
+      signals.oilPrice > 100 ? 'Oil price staying above $100' : 'Oil price staying below $100',
+      signals.nuclearThreatLevel > 6 ? 'Nuclear escalation risk' : 'De-escalation in major conflicts',
+      signals.publicDebtGdpRatio > 100 ? 'High public debt and credit stress' : 'Debt stability'
+    ]
+
+    return { nowLine, nearLine, analogyLine, watchItems }
+  }
+
+  const plainSummary = buildPlainSummary()
 
   useEffect(() => {
     const loadContext = async () => {
@@ -242,51 +396,63 @@ export default function TimeMachine() {
           {!contextLoading && contextError && `Local context unavailable: ${contextError}`}
           {!contextLoading && !contextError && contextEvents.length > 0 && 'Local context loaded.'}
         </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          {inputFields.map((field) => {
-            const status = resolveStatus(field.key)
-            const statusStyle = statusStyles[status]
-            return (
-              <label key={field.key} className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs">
-                <div className="flex items-center justify-between text-slate-300">
-                  <span>{field.label}</span>
-                  {field.suffix && <span className="text-slate-500">{field.suffix}</span>}
-                </div>
-                <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
-                  <span className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: statusStyle.color }} />
-                    {statusStyle.label}
-                    {field.source ? `— ${field.source}` : ''}
-                  </span>
-                  {loading && liveFields.includes(field.key) && (
-                    <span className="text-xs text-slate-500">Loading live data...</span>
-                  )}
-                </div>
-                <input
-                  type="number"
-                  value={signals[field.key]}
-                  onChange={(event) =>
-                    setSignals((prev) => ({
-                      ...prev,
-                      [field.key]: Number(event.target.value)
-                    }))
-                  }
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"
-                />
-                {field.key === 'tempAnomalyC' && (
-                  <div className="mt-2 text-xs text-slate-500">
-                    NASA GISS shows +1.2°C as of 2026. Update manually from:
-                    <span className="ml-1 text-slate-400">climate.nasa.gov/vital-signs/global-temperature</span>
-                  </div>
-                )}
-                {field.key === 'techLayoffs12mo' && (
-                  <div className="mt-2 text-xs text-slate-500">
-                    Layoffs.fyi has no public API — using manual override.
-                  </div>
-                )}
-              </label>
-            )
-          })}
+        <div className="mt-1 text-xs text-slate-500">
+          Calibration: {calibrationStatus === 'ready' ? 'loaded' : 'missing'}
+        </div>
+        <div className="mt-4 space-y-6">
+          {inputSections.map((section) => (
+            <div key={section.title}>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                {section.title}
+              </div>
+              <div className="mt-3 grid gap-4 md:grid-cols-2">
+                {section.fields.map((field) => {
+                  const status = resolveStatus(field.key)
+                  const statusStyle = statusStyles[status]
+                  return (
+                    <label key={field.key} className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs">
+                      <div className="flex items-center justify-between text-slate-300">
+                        <span>{field.label}</span>
+                        {field.suffix && <span className="text-slate-500">{field.suffix}</span>}
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
+                        <span className="flex items-center gap-2">
+                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: statusStyle.color }} />
+                          {statusStyle.label}
+                          {field.source ? `— ${field.source}` : ''}
+                        </span>
+                        {loading && liveFields.includes(field.key) && (
+                          <span className="text-xs text-slate-500">Loading live data...</span>
+                        )}
+                      </div>
+                      <input
+                        type="number"
+                        value={signals[field.key]}
+                        onChange={(event) =>
+                          setSignals((prev) => ({
+                            ...prev,
+                            [field.key]: Number(event.target.value)
+                          }))
+                        }
+                        className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"
+                      />
+                      {field.key === 'tempAnomalyC' && (
+                        <div className="mt-2 text-xs text-slate-500">
+                          NASA GISS shows +1.2°C as of 2026. Update manually from:
+                          <span className="ml-1 text-slate-400">climate.nasa.gov/vital-signs/global-temperature</span>
+                        </div>
+                      )}
+                      {field.key === 'techLayoffs12mo' && (
+                        <div className="mt-2 text-xs text-slate-500">
+                          Layoffs.fyi has no public API — using manual override.
+                        </div>
+                      )}
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
         {getSignalWarnings(signals).length > 0 && (
           <div className="mb-3 rounded-lg border border-amber-400/30 bg-amber-500/10 p-3">
@@ -454,6 +620,102 @@ export default function TimeMachine() {
           </div>
         </section>
 
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-glow">
+          <div className="text-sm font-semibold text-white">Plain English Summary</div>
+          <div className="mt-3 space-y-3 text-sm text-slate-300">
+            <p>{plainSummary.nowLine}</p>
+            <p>{plainSummary.nearLine}</p>
+            <p>{plainSummary.analogyLine}</p>
+          </div>
+          <div className="mt-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">What to watch</div>
+            <div className="mt-2 grid gap-2 md:grid-cols-3 text-xs text-slate-300">
+              {plainSummary.watchItems.map((item) => (
+                <div key={item} className="rounded-lg border border-white/10 bg-black/20 p-2">
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-glow">
+          <div className="text-sm font-semibold text-white">Uncertainty Bands (P10 / P50 / P90)</div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3 text-xs text-slate-300">
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="text-slate-400">GDP Next Year</div>
+              <div className="mt-2 text-sm font-semibold text-white">
+                {prediction.uncertainty.gdp.p10}% / {prediction.uncertainty.gdp.p50}% / {prediction.uncertainty.gdp.p90}%
+              </div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="text-slate-400">Conflict Index</div>
+              <div className="mt-2 text-sm font-semibold text-white">
+                {prediction.uncertainty.conflict.p10} / {prediction.uncertainty.conflict.p50} / {prediction.uncertainty.conflict.p90}
+              </div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="text-slate-400">Oil Price Next Year</div>
+              <div className="mt-2 text-sm font-semibold text-white">
+                ${prediction.uncertainty.oil.p10} / ${prediction.uncertainty.oil.p50} / $
+                {prediction.uncertainty.oil.p90}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-glow">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-white">Quant Core (Quarterly)</div>
+              <div className="mt-1 text-xs text-slate-400">
+                Regime-weighted quarterly GDP distribution for global + blocs.
+              </div>
+            </div>
+            <div className="text-xs text-slate-400">Monte Carlo: 200 sims</div>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3 text-xs text-slate-300">
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="text-slate-400">Calm</div>
+              <div className="mt-2 text-sm font-semibold text-white">{quantCore.regimes.calm}%</div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="text-slate-400">Stressed</div>
+              <div className="mt-2 text-sm font-semibold text-white">{quantCore.regimes.stressed}%</div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="text-slate-400">Crisis</div>
+              <div className="mt-2 text-sm font-semibold text-white">{quantCore.regimes.crisis}%</div>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            {[
+              { title: 'Global', series: quantCore.global },
+              { title: 'United States', series: quantCore.blocs.US },
+              { title: 'Europe', series: quantCore.blocs.EU },
+              { title: 'China', series: quantCore.blocs.China }
+            ].map((bloc) => (
+              <div key={bloc.title} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="text-sm font-semibold text-white">{bloc.title}</div>
+                <div className="mt-3 grid grid-cols-4 gap-2 text-xs text-slate-300">
+                  <div className="text-slate-500">Q</div>
+                  <div className="text-slate-500">P10</div>
+                  <div className="text-slate-500">P50</div>
+                  <div className="text-slate-500">P90</div>
+                  {bloc.series.map((row) => (
+                    <div key={`${bloc.title}-${row.quarter}`} className="contents">
+                      <div className="text-slate-400">Q{row.quarter}</div>
+                      <div>{row.gdp.p10}%</div>
+                      <div>{row.gdp.p50}%</div>
+                      <div>{row.gdp.p90}%</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className="grid gap-4 md:grid-cols-3">
           {(['optimistic', 'mostLikely', 'pessimistic'] as const).map((scenarioKey) => {
             const scenario = prediction.scenarios[scenarioKey]
@@ -598,6 +860,37 @@ export default function TimeMachine() {
               </>
             )}
           </div>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-glow">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-white">Historical Backtest</div>
+              <div className="mt-1 text-xs text-slate-400">Compares predicted GDP to actual next-year GDP.</div>
+            </div>
+          </div>
+          {backtest ? (
+            <div className="mt-4 space-y-2 text-xs text-slate-300">
+              <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                Mean absolute error (last {backtest.results.length} years): {backtest.mae}%
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {backtest.results.map((row) => (
+                  <div key={row.baseYear} className="rounded-xl border border-white/10 bg-black/20 p-3">
+                    <div className="text-slate-400">{row.baseYear} → {row.baseYear + 1}</div>
+                    <div className="mt-1">
+                      Predicted: {row.predictedNext.toFixed(2)}% | Actual: {row.actualNext.toFixed(2)}% | Error:{' '}
+                      {row.error.toFixed(2)}%
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 text-xs text-slate-400">
+              Backtest data not found. Run scripts/fetch_historical_data.mjs and scripts/build_calibration.mjs.
+            </div>
+          )}
         </section>
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-glow">

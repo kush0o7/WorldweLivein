@@ -1,3 +1,5 @@
+import { computeCalibrationAdjustment, computeCalibratedGDP } from './calibration'
+
 export interface CurrentSignals {
   oilPrice: number
   globalGDPGrowth: number
@@ -23,6 +25,21 @@ export interface CurrentSignals {
   globalDebtToGdp: number
   reserveCurrencyTrend: number
   giniCoefficient: number
+  usGDPGrowth: number
+  euGDPGrowth: number
+  chinaGDPGrowth: number
+  usInflation: number
+  euInflation: number
+  chinaInflation: number
+  usUnemployment: number
+  euUnemployment: number
+  chinaUnemployment: number
+  usDebtGdpRatio: number
+  euDebtGdpRatio: number
+  chinaDebtGdpRatio: number
+  yieldCurve10y2y: number
+  creditSpreadBaaAaa: number
+  policyRate: number
   aiAdoptionRate?: number
 }
 
@@ -84,6 +101,8 @@ export interface ModelOutputs {
   richardson: ReturnType<typeof richardsonArmsDynamics>
   brynjolfsson: ReturnType<typeof brynjolfssonJCurve>
   dalio: ReturnType<typeof dalioCyclePosition>
+  policy: ReturnType<typeof policyReactionFunction>
+  market: ReturnType<typeof marketSignalScore>
 }
 
 export interface TimeMachinePrediction {
@@ -97,7 +116,14 @@ export interface TimeMachinePrediction {
   keyOpportunities: Opportunity[]
   confidenceScore: number
   modelOutputs: ModelOutputs
+  uncertainty: {
+    gdp: { p10: number; p50: number; p90: number }
+    conflict: { p10: number; p50: number; p90: number }
+    oil: { p10: number; p50: number; p90: number }
+  }
 }
+
+export type PredictionMode = 'full' | 'backtest'
 
 export const clampSignals = (raw: CurrentSignals): CurrentSignals => ({
   ...raw,
@@ -106,6 +132,15 @@ export const clampSignals = (raw: CurrentSignals): CurrentSignals => ({
   globalGDPGrowth: Math.max(-15, Math.min(15, raw.globalGDPGrowth)),
   inflationRate: Math.max(0, Math.min(50, raw.inflationRate)),
   unemploymentRate: Math.max(0, Math.min(40, raw.unemploymentRate)),
+  usGDPGrowth: Math.max(-15, Math.min(15, raw.usGDPGrowth)),
+  euGDPGrowth: Math.max(-15, Math.min(15, raw.euGDPGrowth)),
+  chinaGDPGrowth: Math.max(-15, Math.min(15, raw.chinaGDPGrowth)),
+  usInflation: Math.max(0, Math.min(50, raw.usInflation)),
+  euInflation: Math.max(0, Math.min(50, raw.euInflation)),
+  chinaInflation: Math.max(0, Math.min(50, raw.chinaInflation)),
+  usUnemployment: Math.max(0, Math.min(40, raw.usUnemployment)),
+  euUnemployment: Math.max(0, Math.min(40, raw.euUnemployment)),
+  chinaUnemployment: Math.max(0, Math.min(40, raw.chinaUnemployment)),
   nuclearThreatLevel: Math.max(0, Math.min(10, raw.nuclearThreatLevel)),
   chipWarIntensity: Math.max(0, Math.min(10, raw.chipWarIntensity)),
   populismIndex: Math.max(0, Math.min(10, raw.populismIndex)),
@@ -113,12 +148,18 @@ export const clampSignals = (raw: CurrentSignals): CurrentSignals => ({
   tradeOpenness: Math.max(0, Math.min(100, raw.tradeOpenness)),
   laborShareOfIncome: Math.max(20, Math.min(80, raw.laborShareOfIncome)),
   publicDebtGdpRatio: Math.max(0, Math.min(300, raw.publicDebtGdpRatio)),
+  usDebtGdpRatio: Math.max(0, Math.min(300, raw.usDebtGdpRatio)),
+  euDebtGdpRatio: Math.max(0, Math.min(300, raw.euDebtGdpRatio)),
+  chinaDebtGdpRatio: Math.max(0, Math.min(300, raw.chinaDebtGdpRatio)),
   globalDebtToGdp: Math.max(0, Math.min(500, raw.globalDebtToGdp)),
   externalDebtGdpRatio: Math.max(0, Math.min(200, raw.externalDebtGdpRatio)),
   activeWarCount: Math.max(0, Math.min(30, raw.activeWarCount)),
   conflictDeaths12mo: Math.max(0, Math.min(10_000_000, raw.conflictDeaths12mo)),
   alliancePolarisation: Math.max(0, Math.min(10, raw.alliancePolarisation)),
-  reserveCurrencyTrend: Math.max(-10, Math.min(10, raw.reserveCurrencyTrend))
+  reserveCurrencyTrend: Math.max(-10, Math.min(10, raw.reserveCurrencyTrend)),
+  yieldCurve10y2y: Math.max(-5, Math.min(5, raw.yieldCurve10y2y)),
+  creditSpreadBaaAaa: Math.max(0, Math.min(6, raw.creditSpreadBaaAaa)),
+  policyRate: Math.max(0, Math.min(20, raw.policyRate))
 })
 
 const NORMALIZATION_RANGES: Record<keyof CurrentSignals, [number, number]> = {
@@ -146,6 +187,21 @@ const NORMALIZATION_RANGES: Record<keyof CurrentSignals, [number, number]> = {
   globalDebtToGdp: [100, 350],
   reserveCurrencyTrend: [-10, 10],
   giniCoefficient: [20, 100],
+  usGDPGrowth: [-10, 8],
+  euGDPGrowth: [-10, 6],
+  chinaGDPGrowth: [-5, 10],
+  usInflation: [0, 20],
+  euInflation: [0, 20],
+  chinaInflation: [0, 20],
+  usUnemployment: [2, 25],
+  euUnemployment: [2, 25],
+  chinaUnemployment: [2, 25],
+  usDebtGdpRatio: [0, 200],
+  euDebtGdpRatio: [0, 200],
+  chinaDebtGdpRatio: [0, 200],
+  yieldCurve10y2y: [-4, 4],
+  creditSpreadBaaAaa: [0, 5],
+  policyRate: [0, 10],
   aiAdoptionRate: [0, 100]
 }
 
@@ -425,6 +481,21 @@ export const DEFAULT_SIGNALS: CurrentSignals = {
   globalDebtToGdp: 280,
   reserveCurrencyTrend: -2.5,
   giniCoefficient: 66,
+  usGDPGrowth: 2.0,
+  euGDPGrowth: 1.4,
+  chinaGDPGrowth: 4.5,
+  usInflation: 3.0,
+  euInflation: 2.5,
+  chinaInflation: 2.0,
+  usUnemployment: 4.0,
+  euUnemployment: 6.0,
+  chinaUnemployment: 4.8,
+  usDebtGdpRatio: 122,
+  euDebtGdpRatio: 90,
+  chinaDebtGdpRatio: 85,
+  yieldCurve10y2y: 0.2,
+  creditSpreadBaaAaa: 1.2,
+  policyRate: 4.5,
   aiAdoptionRate: 65
 }
 
@@ -608,7 +679,183 @@ const computeAllModels = (signals: CurrentSignals): ModelOutputs => {
     nordhaus: nordhausDamageFunction(signals.tempAnomalyC),
     richardson: richardsonArmsDynamics(signals),
     brynjolfsson: brynjolfssonJCurve(signals, aiEraYear),
-    dalio: dalioCyclePosition(signals)
+    dalio: dalioCyclePosition(signals),
+    policy: policyReactionFunction(signals),
+    market: marketSignalScore(signals)
+  }
+}
+
+const policyReactionFunction = (signals: CurrentSignals) => {
+  const inflationTarget = 2.0
+  const neutralRate = 2.0
+  const unemploymentNatural = 4.0
+  const inflationGap = signals.inflationRate - inflationTarget
+  const unemploymentGap = signals.unemploymentRate - unemploymentNatural
+  const taylorRate = neutralRate + 1.5 * inflationGap - 0.5 * unemploymentGap
+  const currentRate = signals.policyRate
+  const projectedRate = 0.7 * currentRate + 0.3 * taylorRate
+  const rateGap = projectedRate - currentRate
+  const fiscalImpulse = Math.max(-2, Math.min(2, (signals.publicDebtGdpRatio - 90) / 50)) * -0.5
+  const policyDrag = Math.max(-3, Math.min(3, (projectedRate - neutralRate) * 0.35)) + fiscalImpulse
+  return {
+    policyRate: Number(currentRate.toFixed(2)),
+    taylorRate: Number(taylorRate.toFixed(2)),
+    projectedRate: Number(projectedRate.toFixed(2)),
+    rateGap: Number(rateGap.toFixed(2)),
+    policyDrag: Number(policyDrag.toFixed(2)),
+    fiscalImpulse: Number(fiscalImpulse.toFixed(2))
+  }
+}
+
+const marketSignalScore = (signals: CurrentSignals) => {
+  const yieldCurve = signals.yieldCurve10y2y
+  const creditSpread = signals.creditSpreadBaaAaa
+  const yieldStress = yieldCurve < 0 ? clamp(Math.abs(yieldCurve) / 2, 0, 1) : 0
+  const creditStress = clamp((creditSpread - 1) / 2.5, 0, 1)
+  const stressScore = clamp(0.55 * yieldStress + 0.45 * creditStress, 0, 1)
+  return {
+    yieldCurve,
+    creditSpread,
+    stressScore: Number(stressScore.toFixed(2))
+  }
+}
+
+const macroCoreGDP = (
+  signals: CurrentSignals,
+  modelOutputs: ModelOutputs,
+  calibrationAdj: number
+) => {
+  const baseGrowth =
+    0.5 * signals.globalGDPGrowth +
+    0.2 * signals.usGDPGrowth +
+    0.15 * signals.euGDPGrowth +
+    0.15 * signals.chinaGDPGrowth
+  let gdp = baseGrowth + calibrationAdj
+  gdp += modelOutputs.reinhartRogoff.gdpPenalty
+  gdp -= modelOutputs.nordhaus
+  const aiEffect = modelOutputs.brynjolfsson.currentPhase === 'harvest'
+    ? modelOutputs.brynjolfsson.productivityEffect * 0.6
+    : modelOutputs.brynjolfsson.productivityEffect * 0.3
+  gdp += aiEffect
+
+  const oilDragLinear = Math.max(0, (signals.oilPrice - 70) / 100) * 0.6
+  const oilDragKink =
+    signals.oilPrice > 120 ? Math.pow((signals.oilPrice - 120) / 80, 2) * 1.2 : 0
+  gdp -= oilDragLinear + oilDragKink
+
+  const marketDrag = modelOutputs.market.stressScore * 1.1
+  gdp -= marketDrag
+
+  const debtDragFactor = signals.publicDebtGdpRatio > 120 ? 0.6 : signals.publicDebtGdpRatio > 90 ? 0.8 : 1
+  gdp += modelOutputs.policy.policyDrag * debtDragFactor
+
+  const socialStress = clamp(
+    (signals.unemploymentRate - 4) / 10 + (signals.inflationRate - 3) / 10 + (signals.populismIndex / 10) * 0.2,
+    -1,
+    2
+  )
+  gdp -= socialStress * 0.3
+
+  if (signals.tempAnomalyC > 2.0) {
+    const tippingMultiplier = 1 + (signals.tempAnomalyC - 2.0) * 0.5
+    gdp -= modelOutputs.nordhaus * tippingMultiplier
+  }
+
+  if (modelOutputs.richardson.warProbability12mo > 0.5 || signals.activeWarCount > 7) {
+    gdp -= 0.8
+  } else if (modelOutputs.richardson.warProbability12mo > 0.35) {
+    gdp -= 0.4
+  }
+
+  return Number(gdp.toFixed(2))
+}
+
+const computeConflictIndex = (
+  signals: CurrentSignals,
+  modelOutputs: ModelOutputs,
+  weightedConflict: number
+) => {
+  const socialStress = clamp(
+    (signals.unemploymentRate - 4) / 10 + (signals.inflationRate - 3) / 10 + (signals.populismIndex / 10) * 0.2,
+    -1,
+    2
+  )
+  return weightedConflict + modelOutputs.richardson.conflictAcceleration * 5 + socialStress * 2
+}
+
+const createSeededRandom = (seed: number) => {
+  let s = seed
+  return () => {
+    s = (s * 9301 + 49297) % 233280
+    return s / 233280
+  }
+}
+
+const gaussian = (rand: () => number) => {
+  const u = rand() || 0.0001
+  const v = rand() || 0.0001
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v)
+}
+
+const percentile = (values: number[], p: number) => {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const idx = Math.floor((p / 100) * (sorted.length - 1))
+  return Number(sorted[idx].toFixed(2))
+}
+
+const computeUncertaintyBands = (
+  signals: CurrentSignals,
+  modelOutputs: ModelOutputs,
+  weightedConflict: number
+) => {
+  const seed = Math.round(signals.oilPrice * 100 + signals.globalGDPGrowth * 10 + signals.inflationRate * 7)
+  const rand = createSeededRandom(seed)
+  const simulations = 200
+  const gdpSamples: number[] = []
+  const conflictSamples: number[] = []
+  const oilSamples: number[] = []
+
+  for (let i = 0; i < simulations; i += 1) {
+    const shockInflation = gaussian(rand) * 0.6
+    const shockOil = gaussian(rand) * 5
+    const shockUnemployment = gaussian(rand) * 0.4
+    const shockConflict = gaussian(rand) * 0.3
+
+    const perturbed = clampSignals({
+      ...signals,
+      inflationRate: signals.inflationRate + shockInflation,
+      oilPrice: signals.oilPrice + shockOil,
+      unemploymentRate: signals.unemploymentRate + shockUnemployment,
+      geopoliticalTension: signals.geopoliticalTension + shockConflict
+    })
+
+    const calibrationAdj = computeCalibrationAdjustment(perturbed)
+    const gdp = macroCoreGDP(perturbed, modelOutputs, calibrationAdj)
+    const conflict = computeConflictIndex(perturbed, modelOutputs, weightedConflict)
+    const oil = perturbed.oilPrice * (1 + conflict / 300)
+
+    gdpSamples.push(gdp)
+    conflictSamples.push(conflict)
+    oilSamples.push(oil)
+  }
+
+  return {
+    gdp: {
+      p10: percentile(gdpSamples, 10),
+      p50: percentile(gdpSamples, 50),
+      p90: percentile(gdpSamples, 90)
+    },
+    conflict: {
+      p10: percentile(conflictSamples, 10),
+      p50: percentile(conflictSamples, 50),
+      p90: percentile(conflictSamples, 90)
+    },
+    oil: {
+      p10: percentile(oilSamples, 10),
+      p50: percentile(oilSamples, 50),
+      p90: percentile(oilSamples, 90)
+    }
   }
 }
 
@@ -690,16 +937,10 @@ const buildScenario = (
   if (label === 'pessimistic') adjustment = -1.6
 
   let gdpGrowthNextYear = weightedGDP + adjustment
-  gdpGrowthNextYear += modelOutputs.reinhartRogoff.gdpPenalty
-  const climateDrag = modelOutputs.nordhaus
-  gdpGrowthNextYear -= climateDrag
+  const calibrationAdj = computeCalibrationAdjustment(current)
+  gdpGrowthNextYear = macroCoreGDP(current, modelOutputs, calibrationAdj) + adjustment
 
-  if (current.tempAnomalyC > 2.0) {
-    const tippingMultiplier = 1 + (current.tempAnomalyC - 2.0) * 0.5
-    gdpGrowthNextYear -= climateDrag * tippingMultiplier
-  }
-
-  const conflictAdjustment = weightedConflict + modelOutputs.richardson.conflictAcceleration * 5
+  const conflictAdjustment = computeConflictIndex(current, modelOutputs, weightedConflict)
   const oilPriceNextYear = current.oilPrice * (1 + conflictAdjustment / 300) + adjustment * 3
   const conflictTrend = conflictTrendFromChange(conflictAdjustment + adjustment * 6)
 
@@ -724,11 +965,13 @@ const buildScenario = (
 
 export const generatePrediction = (
   rawSignals: CurrentSignals,
-  contextEvents?: ContextEvent[]
+  contextEvents?: ContextEvent[],
+  mode: PredictionMode = 'full'
 ): TimeMachinePrediction => {
   const signals = clampSignals(rawSignals)
   const modelOutputs = computeAllModels(signals)
-  const topAnalogies = findAnalogies(signals, 3, contextEvents, modelOutputs)
+  const useContext = mode === 'full' ? contextEvents : undefined
+  const topAnalogies = findAnalogies(signals, 3, useContext, modelOutputs)
   const mostLikely = buildScenario('mostLikely', topAnalogies, signals, modelOutputs)
   const optimistic = buildScenario('optimistic', topAnalogies, signals, modelOutputs)
   const pessimistic = buildScenario('pessimistic', topAnalogies, signals, modelOutputs)
@@ -748,6 +991,12 @@ export const generatePrediction = (
   }
   if (signals.populismIndex > 7) {
     keyRisks.push({ label: 'Political rupture risk — similar to 1930s', severity: 'medium' })
+  }
+  if (signals.yieldCurve10y2y < 0) {
+    keyRisks.push({ label: 'Yield curve inversion risk — recession signal', severity: 'medium' })
+  }
+  if (signals.creditSpreadBaaAaa > 1.8) {
+    keyRisks.push({ label: 'Credit stress risk — spreads widening', severity: 'medium' })
   }
   if (modelOutputs.reinhartRogoff.riskScore > 0.4) {
     keyRisks.push({ label: 'Debt crisis risk — Reinhart-Rogoff thresholds breached', severity: 'high' })
@@ -770,7 +1019,27 @@ export const generatePrediction = (
     keyOpportunities.push({ label: 'GPT harvest phase — productivity unlocks accelerating', severity: 'medium' })
   }
 
+  if (mode === 'backtest') {
+    const calibrated = computeCalibratedGDP(signals)
+    const baseScenario = { ...mostLikely, gdpGrowthNextYear: Number(calibrated.toFixed(2)) }
+    const uncertainty = computeUncertaintyBands(signals, modelOutputs, weightedAverage(topAnalogies, (item) => item.conflictChange))
+    return {
+      topAnalogies,
+      scenarios: {
+        mostLikely: baseScenario,
+        optimistic: baseScenario,
+        pessimistic: baseScenario
+      },
+      keyRisks: [],
+      keyOpportunities: [],
+      confidenceScore: 0,
+      modelOutputs,
+      uncertainty
+    }
+  }
+
   const confidenceScore = Math.round((topAnalogies[0]?.analogyScore ?? 0) * 100)
+  const uncertainty = computeUncertaintyBands(signals, modelOutputs, weightedAverage(topAnalogies, (item) => item.conflictChange))
 
   return {
     topAnalogies,
@@ -782,6 +1051,7 @@ export const generatePrediction = (
     keyRisks,
     keyOpportunities,
     confidenceScore,
-    modelOutputs
+    modelOutputs,
+    uncertainty
   }
 }

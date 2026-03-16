@@ -33,6 +33,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/gdelt/, '')
       },
+      '/api/worldbank': {
+        target: 'https://api.worldbank.org',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/worldbank/, '')
+      },
       '/api/stooq': {
         target: 'https://stooq.com',
         changeOrigin: true,

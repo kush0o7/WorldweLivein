@@ -27,6 +27,9 @@ const requireEnv = (key: string) => {
 
 const oilCache: { value: number; timestamp: number } = { value: 0, timestamp: 0 }
 const OIL_CACHE_TTL_MS = 60 * 60 * 1000
+const warCache: { value: number; timestamp: number } = { value: 0, timestamp: 0 }
+const WAR_CACHE_TTL_MS = 6 * 60 * 60 * 1000
+const WAR_CACHE_KEY = 'pws_war_count_cache_v1'
 
 const getCachedOil = () => {
   if (oilCache.value && Date.now() - oilCache.timestamp < OIL_CACHE_TTL_MS) {
@@ -38,6 +41,35 @@ const getCachedOil = () => {
 const setCachedOil = (value: number) => {
   oilCache.value = value
   oilCache.timestamp = Date.now()
+}
+
+const getCachedWarCount = () => {
+  if (warCache.value && Date.now() - warCache.timestamp < WAR_CACHE_TTL_MS) {
+    return warCache.value
+  }
+  try {
+    const raw = localStorage.getItem(WAR_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { value: number; timestamp: number }
+    if (parsed?.value && Date.now() - parsed.timestamp < WAR_CACHE_TTL_MS) {
+      warCache.value = parsed.value
+      warCache.timestamp = parsed.timestamp
+      return parsed.value
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return null
+}
+
+const setCachedWarCount = (value: number) => {
+  warCache.value = value
+  warCache.timestamp = Date.now()
+  try {
+    localStorage.setItem(WAR_CACHE_KEY, JSON.stringify({ value, timestamp: warCache.timestamp }))
+  } catch {
+    // ignore storage errors
+  }
 }
 
 const fetchOilFromYahoo = async () => {
@@ -88,7 +120,7 @@ async function fetchOilPrice(): Promise<number> {
 
 async function fetchGlobalGDP(): Promise<number> {
   const response = await fetch(
-    'https://api.worldbank.org/v2/country/WLD/indicator/NY.GDP.MKTP.KD.ZG?format=json&mrv=1'
+    '/api/worldbank/v2/country/WLD/indicator/NY.GDP.MKTP.KD.ZG?format=json&mrv=1'
   )
   const data = await parseJson(response)
   const value = data?.[1]?.[0]?.value
@@ -97,6 +129,27 @@ async function fetchGlobalGDP(): Promise<number> {
   }
   return value
 }
+
+const fetchWorldBankIndicator = async (country: string, indicator: string): Promise<number> => {
+  const response = await fetch(
+    `/api/worldbank/v2/country/${country}/indicator/${indicator}?format=json&mrv=1`
+  )
+  const data = await parseJson(response)
+  const value = data?.[1]?.[0]?.value
+  if (typeof value !== 'number') {
+    throw new Error(`${indicator} missing for ${country}`)
+  }
+  return value
+}
+
+const fetchGdpGrowth = (country: string) =>
+  fetchWorldBankIndicator(country, 'NY.GDP.MKTP.KD.ZG')
+
+const fetchInflation = (country: string) =>
+  fetchWorldBankIndicator(country, 'FP.CPI.TOTL.ZG')
+
+const fetchUnemployment = (country: string) =>
+  fetchWorldBankIndicator(country, 'SL.UEM.TOTL.ZS')
 
 async function fetchInflationRate(): Promise<number> {
   const apiKey = requireEnv('VITE_FRED_API_KEY')
@@ -126,6 +179,25 @@ async function fetchUnemploymentRate(): Promise<number> {
   const value = data?.observations?.[0]?.value
   return toNumber(value)
 }
+
+const fetchFredSeriesLatest = async (seriesId: string): Promise<number> => {
+  const apiKey = requireEnv('VITE_FRED_API_KEY')
+  const response = await fetch(
+    `/api/fred/fred/series/observations?series_id=${seriesId}&api_key=${apiKey}&limit=1&sort_order=desc&file_type=json`
+  )
+  const data = await parseJson(response)
+  const value = data?.observations?.[0]?.value
+  return toNumber(value)
+}
+
+const fetchYieldCurve10y2y = async (): Promise<number> => fetchFredSeriesLatest('T10Y2Y')
+
+const fetchCreditSpreadBaaAaa = async (): Promise<number> => {
+  const [baa, aaa] = await Promise.all([fetchFredSeriesLatest('BAA'), fetchFredSeriesLatest('AAA')])
+  return Number((baa - aaa).toFixed(2))
+}
+
+const fetchPolicyRate = async (): Promise<number> => fetchFredSeriesLatest('FEDFUNDS')
 
 const extractTimelineValues = (data: unknown): number[] => {
   if (!data) return []
@@ -161,37 +233,93 @@ const extractTimelineValues = (data: unknown): number[] => {
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 async function fetchActiveWarCount(): Promise<number> {
+  const cached = getCachedWarCount()
+  if (cached !== null) return cached
+
   const query = encodeURIComponent(
     '(war OR conflict OR battle OR bombing OR shelling OR airstrike OR drone OR missile)'
   )
   const url = `/api/gdelt/api/v2/doc/doc?query=${query}&mode=TimelineVolRaw&timespan=30d&format=json`
   const response = await fetch(url)
-  const data = await parseJson(response)
+  if (!response.ok) {
+    if (response.status === 429) {
+      const fallback = getCachedWarCount()
+      if (fallback !== null) return fallback
+      return 9
+    }
+    throw new Error(`GDELT failed: ${response.status}`)
+  }
+  const data = await response.json()
   const values = extractTimelineValues(data)
   if (values.length === 0) {
-    throw new Error('GDELT timeline missing')
+    return cached ?? 9
   }
   const total = values.reduce((sum, value) => sum + value, 0)
   const scaled = Math.round(Math.log10(total + 1) * 2.5)
-  return clamp(scaled, 0, 15)
+  const result = clamp(scaled, 0, 15)
+  setCachedWarCount(result)
+  return result
 }
 
 export async function fetchLiveSignals(): Promise<Partial<CurrentSignals>> {
   const results: Partial<CurrentSignals> = {}
 
-  const [oil, gdp, inflation, unemployment, wars] = await Promise.allSettled([
+  const [
+    oil,
+    gdp,
+    inflation,
+    unemployment,
+    wars,
+    usGdp,
+    euGdp,
+    cnGdp,
+    euInflation,
+    cnInflation,
+    euUnemployment,
+    cnUnemployment,
+    yieldCurve,
+    creditSpread,
+    policyRate
+  ] =
+    await Promise.allSettled([
     fetchOilPrice(),
     fetchGlobalGDP(),
     fetchInflationRate(),
     fetchUnemploymentRate(),
-    fetchActiveWarCount()
+    fetchActiveWarCount(),
+    fetchGdpGrowth('USA'),
+    fetchGdpGrowth('EUU'),
+    fetchGdpGrowth('CHN'),
+    fetchInflation('EUU'),
+    fetchInflation('CHN'),
+    fetchUnemployment('EUU'),
+    fetchUnemployment('CHN'),
+    fetchYieldCurve10y2y(),
+    fetchCreditSpreadBaaAaa(),
+    fetchPolicyRate()
   ])
 
   if (oil.status === 'fulfilled') results.oilPrice = oil.value
   if (gdp.status === 'fulfilled') results.globalGDPGrowth = gdp.value
-  if (inflation.status === 'fulfilled') results.inflationRate = inflation.value
-  if (unemployment.status === 'fulfilled') results.unemploymentRate = unemployment.value
+  if (inflation.status === 'fulfilled') {
+    results.inflationRate = inflation.value
+    results.usInflation = inflation.value
+  }
+  if (unemployment.status === 'fulfilled') {
+    results.unemploymentRate = unemployment.value
+    results.usUnemployment = unemployment.value
+  }
   if (wars.status === 'fulfilled') results.activeWarCount = wars.value
+  if (usGdp.status === 'fulfilled') results.usGDPGrowth = usGdp.value
+  if (euGdp.status === 'fulfilled') results.euGDPGrowth = euGdp.value
+  if (cnGdp.status === 'fulfilled') results.chinaGDPGrowth = cnGdp.value
+  if (euInflation.status === 'fulfilled') results.euInflation = euInflation.value
+  if (cnInflation.status === 'fulfilled') results.chinaInflation = cnInflation.value
+  if (euUnemployment.status === 'fulfilled') results.euUnemployment = euUnemployment.value
+  if (cnUnemployment.status === 'fulfilled') results.chinaUnemployment = cnUnemployment.value
+  if (yieldCurve.status === 'fulfilled') results.yieldCurve10y2y = yieldCurve.value
+  if (creditSpread.status === 'fulfilled') results.creditSpreadBaaAaa = creditSpread.value
+  if (policyRate.status === 'fulfilled') results.policyRate = policyRate.value
 
   return results
 }

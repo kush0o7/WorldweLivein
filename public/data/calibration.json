@@ -1,0 +1,9 @@
+{
+  "inflationCoef": -0.009,
+  "unemploymentCoef": -0.3048,
+  "oilCoef": 0,
+  "meanInflation": 4.5321,
+  "meanUnemployment": 5.9172,
+  "meanGdp": 2.9596,
+  "baselineOil": 0
+}

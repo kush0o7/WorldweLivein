@@ -1,0 +1,338 @@
+[
+  {
+    "year": 1970,
+    "gdpGrowth": 3.77713097375472,
+    "inflation": null,
+    "unemployment": null
+  },
+  {
+    "year": 1971,
+    "gdpGrowth": 4.16625411127447,
+    "inflation": null,
+    "unemployment": null
+  },
+  {
+    "year": 1972,
+    "gdpGrowth": 5.54627522497742,
+    "inflation": null,
+    "unemployment": null
+  },
+  {
+    "year": 1973,
+    "gdpGrowth": 6.43422416541112,
+    "inflation": null,
+    "unemployment": null
+  },
+  {
+    "year": 1974,
+    "gdpGrowth": 1.96923893177501,
+    "inflation": null,
+    "unemployment": null
+  },
+  {
+    "year": 1975,
+    "gdpGrowth": 0.633394222127251,
+    "inflation": null,
+    "unemployment": null
+  },
+  {
+    "year": 1976,
+    "gdpGrowth": 5.18125795120345,
+    "inflation": null,
+    "unemployment": null
+  },
+  {
+    "year": 1977,
+    "gdpGrowth": 4.00810867281642,
+    "inflation": null,
+    "unemployment": null
+  },
+  {
+    "year": 1978,
+    "gdpGrowth": 4.11206866955771,
+    "inflation": null,
+    "unemployment": null
+  },
+  {
+    "year": 1979,
+    "gdpGrowth": 4.11963847718076,
+    "inflation": null,
+    "unemployment": null
+  },
+  {
+    "year": 1980,
+    "gdpGrowth": 1.86031229895617,
+    "inflation": null,
+    "unemployment": null
+  },
+  {
+    "year": 1981,
+    "gdpGrowth": 1.90522388307777,
+    "inflation": 12.4424368936176,
+    "unemployment": null
+  },
+  {
+    "year": 1982,
+    "gdpGrowth": 0.369303397693983,
+    "inflation": 10.2217271376892,
+    "unemployment": null
+  },
+  {
+    "year": 1983,
+    "gdpGrowth": 2.56341167557721,
+    "inflation": 8.66927159808522,
+    "unemployment": null
+  },
+  {
+    "year": 1984,
+    "gdpGrowth": 4.69902818606988,
+    "inflation": 8.08032017255761,
+    "unemployment": null
+  },
+  {
+    "year": 1985,
+    "gdpGrowth": 3.67368589707036,
+    "inflation": 6.80756655768333,
+    "unemployment": null
+  },
+  {
+    "year": 1986,
+    "gdpGrowth": 3.28909654382757,
+    "inflation": 5.82266576732484,
+    "unemployment": null
+  },
+  {
+    "year": 1987,
+    "gdpGrowth": 3.7165706655468,
+    "inflation": 5.71011938486679,
+    "unemployment": null
+  },
+  {
+    "year": 1988,
+    "gdpGrowth": 4.525506806321,
+    "inflation": 7.11340652931347,
+    "unemployment": null
+  },
+  {
+    "year": 1989,
+    "gdpGrowth": 3.66704385911412,
+    "inflation": 6.92390503711238,
+    "unemployment": null
+  },
+  {
+    "year": 1990,
+    "gdpGrowth": 2.74043123173102,
+    "inflation": 8.06346090938833,
+    "unemployment": null
+  },
+  {
+    "year": 1991,
+    "gdpGrowth": 1.23795463953577,
+    "inflation": 8.99693873494331,
+    "unemployment": 5.11939576855541
+  },
+  {
+    "year": 1992,
+    "gdpGrowth": 2.08330128141721,
+    "inflation": 7.63610852336974,
+    "unemployment": 5.27548969894175
+  },
+  {
+    "year": 1993,
+    "gdpGrowth": 1.88997754116687,
+    "inflation": 7.14458706876256,
+    "unemployment": 5.54359975807061
+  },
+  {
+    "year": 1994,
+    "gdpGrowth": 3.39430880680132,
+    "inflation": 10.2479355556119,
+    "unemployment": 5.78918170693904
+  },
+  {
+    "year": 1995,
+    "gdpGrowth": 3.16459831490941,
+    "inflation": 9.07738095238091,
+    "unemployment": 5.91942696026279
+  },
+  {
+    "year": 1996,
+    "gdpGrowth": 3.59262581167523,
+    "inflation": 6.52609569372579,
+    "unemployment": 5.98370073084904
+  },
+  {
+    "year": 1997,
+    "gdpGrowth": 3.96560649440364,
+    "inflation": 5.55412988949405,
+    "unemployment": 6.01013695494246
+  },
+  {
+    "year": 1998,
+    "gdpGrowth": 2.83211105781118,
+    "inflation": 5.09729149331442,
+    "unemployment": 6.15906586247165
+  },
+  {
+    "year": 1999,
+    "gdpGrowth": 3.58036735454232,
+    "inflation": 3.04194667094533,
+    "unemployment": 6.27834886767265
+  },
+  {
+    "year": 2000,
+    "gdpGrowth": 4.55506182477725,
+    "inflation": 3.43351563418767,
+    "unemployment": 6.11126625149596
+  },
+  {
+    "year": 2001,
+    "gdpGrowth": 2.03855309163356,
+    "inflation": 3.83657262052543,
+    "unemployment": 6.18980812535966
+  },
+  {
+    "year": 2002,
+    "gdpGrowth": 2.31107096730885,
+    "inflation": 2.90799857032207,
+    "unemployment": 6.41180854857461
+  },
+  {
+    "year": 2003,
+    "gdpGrowth": 3.09383471039331,
+    "inflation": 3.02504526252236,
+    "unemployment": 6.48390882464603
+  },
+  {
+    "year": 2004,
+    "gdpGrowth": 4.50184539653775,
+    "inflation": 3.51799903099596,
+    "unemployment": 6.32969211241359
+  },
+  {
+    "year": 2005,
+    "gdpGrowth": 4.05453629039749,
+    "inflation": 4.10725070715931,
+    "unemployment": 6.22389912094209
+  },
+  {
+    "year": 2006,
+    "gdpGrowth": 4.47616958858079,
+    "inflation": 4.26717463390264,
+    "unemployment": 5.97374019654838
+  },
+  {
+    "year": 2007,
+    "gdpGrowth": 4.41384473328108,
+    "inflation": 4.81023704342912,
+    "unemployment": 5.77480901338889
+  },
+  {
+    "year": 2008,
+    "gdpGrowth": 2.09239458384161,
+    "inflation": 8.94995335353387,
+    "unemployment": 5.82404352868675
+  },
+  {
+    "year": 2009,
+    "gdpGrowth": -1.31864911944237,
+    "inflation": 2.86044855902674,
+    "unemployment": 6.40934094809211
+  },
+  {
+    "year": 2010,
+    "gdpGrowth": 4.52424032554688,
+    "inflation": 3.32634463368643,
+    "unemployment": 6.28092769649237
+  },
+  {
+    "year": 2011,
+    "gdpGrowth": 3.33900335400304,
+    "inflation": 4.82239636013325,
+    "unemployment": 6.14877677051057
+  },
+  {
+    "year": 2012,
+    "gdpGrowth": 2.73120979279713,
+    "inflation": 3.72532666110646,
+    "unemployment": 6.15180927283386
+  },
+  {
+    "year": 2013,
+    "gdpGrowth": 2.88814205849086,
+    "inflation": 2.65167342916577,
+    "unemployment": 6.09906293447201
+  },
+  {
+    "year": 2014,
+    "gdpGrowth": 3.13301748764174,
+    "inflation": 2.39371597209792,
+    "unemployment": 5.95720582647446
+  },
+  {
+    "year": 2015,
+    "gdpGrowth": 3.11378907834442,
+    "inflation": 1.43702380935655,
+    "unemployment": 5.99825160171964
+  },
+  {
+    "year": 2016,
+    "gdpGrowth": 2.79359207247063,
+    "inflation": 1.59691227583204,
+    "unemployment": 5.97068694834666
+  },
+  {
+    "year": 2017,
+    "gdpGrowth": 3.45183009055707,
+    "inflation": 2.22314331448899,
+    "unemployment": 5.89788808678893
+  },
+  {
+    "year": 2018,
+    "gdpGrowth": 3.27395826417856,
+    "inflation": 2.44258329692817,
+    "unemployment": 5.75951966875999
+  },
+  {
+    "year": 2019,
+    "gdpGrowth": 2.67911757479919,
+    "inflation": 2.227478809383,
+    "unemployment": 5.58822341975783
+  },
+  {
+    "year": 2020,
+    "gdpGrowth": -2.8992231033702,
+    "inflation": 1.90509722047501,
+    "unemployment": 6.58731449706782
+  },
+  {
+    "year": 2021,
+    "gdpGrowth": 6.41334961541973,
+    "inflation": 3.4754032028988,
+    "unemployment": 6.0451914548011
+  },
+  {
+    "year": 2022,
+    "gdpGrowth": 3.40305483746891,
+    "inflation": 7.98518671835033,
+    "unemployment": 5.23426188470581
+  },
+  {
+    "year": 2023,
+    "gdpGrowth": 2.9485947500487,
+    "inflation": 5.87010268787553,
+    "unemployment": 4.84957114230343
+  },
+  {
+    "year": 2024,
+    "gdpGrowth": 2.87194964204313,
+    "inflation": 2.97200477643618,
+    "unemployment": 4.80587275250158
+  },
+  {
+    "year": 2025,
+    "gdpGrowth": null,
+    "inflation": null,
+    "unemployment": 4.79097241077406
+  }
+]

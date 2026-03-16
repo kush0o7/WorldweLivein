@@ -40,7 +40,22 @@ const defaultLabels: Partial<Record<keyof CurrentSignals, string>> = {
   globalDebtToGdp: 'Global Debt/GDP',
   reserveCurrencyTrend: 'Reserve Currency Trend',
   giniCoefficient: 'Gini Coefficient',
-  aiAdoptionRate: 'AI Adoption Rate'
+  aiAdoptionRate: 'AI Adoption Rate',
+  usGDPGrowth: 'US GDP Growth',
+  euGDPGrowth: 'EU GDP Growth',
+  chinaGDPGrowth: 'China GDP Growth',
+  usInflation: 'US Inflation',
+  euInflation: 'EU Inflation',
+  chinaInflation: 'China Inflation',
+  usUnemployment: 'US Unemployment',
+  euUnemployment: 'EU Unemployment',
+  chinaUnemployment: 'China Unemployment',
+  usDebtGdpRatio: 'US Debt/GDP',
+  euDebtGdpRatio: 'EU Debt/GDP',
+  chinaDebtGdpRatio: 'China Debt/GDP',
+  yieldCurve10y2y: 'Yield Curve 10y-2y',
+  creditSpreadBaaAaa: 'Credit Spread BAA-AAA',
+  policyRate: 'Policy Rate'
 }
 
 export function runSensitivityAnalysis(
@@ -78,8 +93,10 @@ export function runSensitivityAnalysis(
       highPrediction.scenarios.mostLikely.oilPriceNextYear -
       lowPrediction.scenarios.mostLikely.oilPriceNextYear
 
-    const composite =
-      Math.abs(gdpSensitivity) * 4 + Math.abs(conflictSensitivity) * 15 + Math.abs(oilSensitivity) * 0.2
+    const safeGdp = Number.isFinite(gdpSensitivity) ? gdpSensitivity : 0
+    const safeConflict = Number.isFinite(conflictSensitivity) ? conflictSensitivity : 0
+    const safeOil = Number.isFinite(oilSensitivity) ? oilSensitivity : 0
+    const composite = Math.abs(safeGdp) * 4 + Math.abs(safeConflict) * 15 + Math.abs(safeOil) * 0.2
 
     results.push({
       signalKey: key,
@@ -87,9 +104,9 @@ export function runSensitivityAnalysis(
       baseValue,
       highValue,
       lowValue,
-      gdpSensitivity: Number(gdpSensitivity.toFixed(2)),
-      conflictSensitivity: Number(conflictSensitivity.toFixed(2)),
-      oilSensitivity: Number(oilSensitivity.toFixed(2)),
+      gdpSensitivity: Number((Number.isFinite(gdpSensitivity) ? gdpSensitivity : 0).toFixed(2)),
+      conflictSensitivity: Number((Number.isFinite(conflictSensitivity) ? conflictSensitivity : 0).toFixed(2)),
+      oilSensitivity: Number((Number.isFinite(oilSensitivity) ? oilSensitivity : 0).toFixed(2)),
       overallSensitivity: clamp(Number(composite.toFixed(2)), 0, 100)
     })
   })

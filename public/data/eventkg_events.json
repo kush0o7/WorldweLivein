@@ -1,0 +1,14 @@
+[
+  {
+    "id": "eventkg-sample-1",
+    "label": "Global inflation pressures ease",
+    "date": "2024-11-15",
+    "description": "Inflation rates begin to moderate across major economies as supply constraints ease."
+  },
+  {
+    "id": "eventkg-sample-2",
+    "label": "Major climate summit agreement",
+    "date": "2025-12-02",
+    "description": "Countries align on accelerated climate finance and emissions targets."
+  }
+]

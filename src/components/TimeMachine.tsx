@@ -5,7 +5,9 @@ import {
   ContextEvent,
   DEFAULT_SIGNALS,
   generatePrediction,
-  TimeMachinePrediction
+  TimeMachinePrediction,
+  PATTERN_LIBRARY,
+  findAnalogies
 } from '../predictor/timeMachine'
 import { clearLiveCaches, fetchLiveSignals, generateNarrative } from '../predictor/liveSignals'
 import { runSensitivityAnalysis, SensitivityResult } from '../predictor/sensitivity'
@@ -184,6 +186,8 @@ export default function TimeMachine() {
   const [shockCalibration, setShockCalibration] = useState<ShockCalibration | null>(null)
   const [quantCore, setQuantCore] = useState<QuantCoreResult>(() => runQuantCore(DEFAULT_SIGNALS))
   const [lastUpdated, setLastUpdated] = useState<number | null>(null)
+  const [lastLiveSuccessAt, setLastLiveSuccessAt] = useState<number | null>(null)
+  const [liveError, setLiveError] = useState('')
 
   const confidenceStyle = useMemo(
     () => ({ width: `${prediction.confidenceScore}%` }),
@@ -231,6 +235,12 @@ export default function TimeMachine() {
   const topMatch = prediction.topAnalogies[0]
   const topScore = topMatch ? topMatch.analogyScore * 100 : 0
   const topScoreColor = topScore > 70 ? '#1D9E75' : topScore >= 40 ? '#BA7517' : '#E24B4A'
+  const allAnalogies = findAnalogies(
+    signals,
+    PATTERN_LIBRARY.length,
+    contextEvents,
+    prediction.modelOutputs
+  )
 
   const resolveStatus = (field: keyof CurrentSignals): DataStatus => {
     const status = dataStatus[field]
@@ -245,6 +255,7 @@ export default function TimeMachine() {
     try {
       const liveData = await fetchLiveSignals(options)
       const now = Date.now()
+      const liveKeys = Object.keys(liveData)
 
       setSignals((prev) => ({
         ...prev,
@@ -270,6 +281,12 @@ export default function TimeMachine() {
         })
         return next
       })
+      if (liveKeys.length > 0) {
+        setLastLiveSuccessAt(now)
+        setLiveError('')
+      } else {
+        setLiveError('Live feeds unavailable. Using manual defaults.')
+      }
       setLastUpdated(now)
       return liveData
     } finally {
@@ -417,6 +434,11 @@ export default function TimeMachine() {
               Last updated: {new Date(lastUpdated).toLocaleTimeString()}
             </span>
           )}
+          {lastLiveSuccessAt && (
+            <span>
+              Live data ok: {new Date(lastLiveSuccessAt).toLocaleTimeString()}
+            </span>
+          )}
           <button
             className="rounded-full border border-white/10 px-3 py-1 text-[11px] font-semibold text-slate-200"
             onClick={() => {
@@ -427,6 +449,11 @@ export default function TimeMachine() {
             Force refresh (ignore cache)
           </button>
         </div>
+        {liveError && (
+          <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+            {liveError} Check `https://worldwe-livein.vercel.app/api/health`.
+          </div>
+        )}
         <div className="mt-4 space-y-6">
           {inputSections.map((section) => (
             <div key={section.title}>
@@ -515,6 +542,30 @@ export default function TimeMachine() {
               <div className="mt-3 text-xs text-slate-400">{pattern.keyLesson}</div>
             </div>
           ))}
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-glow">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold text-white">All Historical Anchors</div>
+            <div className="text-xs text-slate-400">
+              {allAnalogies.length} analogies scored
+            </div>
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {allAnalogies.map((pattern) => (
+              <div
+                key={`all-${pattern.id}`}
+                className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-slate-300"
+              >
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>{pattern.period}</span>
+                  <span>{(pattern.analogyScore * 100).toFixed(1)}%</span>
+                </div>
+                <div className="mt-1 text-sm font-semibold text-white">{pattern.name}</div>
+                <div className="mt-1 text-xs text-slate-400">{pattern.keyLesson}</div>
+              </div>
+            ))}
+          </div>
         </section>
 
         <section className="grid gap-4 md:grid-cols-3">

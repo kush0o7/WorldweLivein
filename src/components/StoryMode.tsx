@@ -28,6 +28,13 @@ export default function StoryMode() {
       `Oil is ~$${formatNumber(signals.oilPrice, 2)}, inflation is ${formatPct(signals.inflationRate, 2)}, ` +
       `and unemployment is ${formatPct(signals.unemploymentRate, 2)}.`
 
+    const depthLine =
+      `Debt remains heavy at ${formatNumber(signals.publicDebtGdpRatio, 0)}% of GDP, ` +
+      `while the yield curve is ${formatNumber(signals.yieldCurve10y2y, 2)}% and credit spreads are ` +
+      `${formatNumber(signals.creditSpreadBaaAaa, 2)}%. ` +
+      `AI investment is ~$${formatNumber(signals.aiInvestmentBillions, 0)}B and the productivity cycle is in ` +
+      `${outputs.brynjolfsson.currentPhase} phase.`
+
     const nextLine =
       `The baseline path for the next 12 months is GDP growth around ${formatPct(
         prediction.scenarios.mostLikely.gdpGrowthNextYear,
@@ -70,6 +77,7 @@ export default function StoryMode() {
 
     return {
       nowLine,
+      depthLine,
       nextLine,
       analogyLine,
       tippingPoints: tippingPoints.slice(0, 3),
@@ -125,6 +133,7 @@ export default function StoryMode() {
         </div>
         <div className="mt-4 space-y-4 text-sm text-slate-200">
           <p>{buildStory.nowLine}</p>
+          <p>{buildStory.depthLine}</p>
           <p>{buildStory.nextLine}</p>
           <p>{buildStory.analogyLine}</p>
         </div>

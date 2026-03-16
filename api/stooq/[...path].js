@@ -1,5 +1,5 @@
-export default async function handler(req: any, res: any) {
-  const path = (req.query.path as string[])?.join('/') ?? ''
+export default async function handler(req, res) {
+  const path = Array.isArray(req.query.path) ? req.query.path.join('/') : ''
   const baseQuery = req.url?.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''
   const target = `https://stooq.com/${path}${baseQuery}`
   const response = await fetch(target)

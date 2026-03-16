@@ -22,7 +22,7 @@ const requireEnv = (key: string) => {
   if (!value) {
     throw new Error(`Missing ${key}`)
   }
-  return value as string
+  return String(value).trim()
 }
 
 const oilCache: { value: number; timestamp: number } = { value: 0, timestamp: 0 }
